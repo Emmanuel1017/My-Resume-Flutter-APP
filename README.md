@@ -7,8 +7,29 @@ Connects to the same Firebase project as the Angular portfolio site — changes 
 
 ---
 
+## Entry Screen — Admin or Guest
+
+On launch, if no user is signed in, the app presents **two bold entry cards**:
+
+| Card | Action |
+|------|--------|
+| **Admin Login** | Opens email/password form → navigates to full admin home on success |
+| **Browse as Guest** | Goes straight to Guest Home — no credentials needed |
+
+---
+
 ## Screens
 
+### Guest Mode (3 tabs)
+Available without any login — useful for sharing a demo link or letting someone explore the portfolio from the admin perspective.
+
+| Tab | Description |
+|-----|-------------|
+| **Portfolio** | WebView of the live site, identical to Admin mode |
+| **Profile** | Full native CV screen — same as Admin mode |
+| **Message** | A contact form that writes directly to Firestore `/contacts` — same endpoint as the Angular contact form. Source is tagged `flutter-guest` so admin can filter by origin. |
+
+### Admin Mode (3 tabs)
 | Tab | Description |
 |-----|-------------|
 | **Portfolio** | WebView of the live site with a native URL bar, animated section-jump pill strip, and JS injection that hides the Angular navbar so the experience feels fully native. Progress indicator and back-navigation are implemented with `ValueNotifier` so the WebView itself is never rebuilt during load or scroll. |
@@ -44,6 +65,17 @@ A **Save Changes** button appears (with animated entry) only when either text fi
 ### Live State Preview
 A monospace card at the bottom shows the current Firestore values exactly as stored (`available_for_work: true`, `auto_on: false`, etc.) with a pulsing dot indicating live/connecting status.
 
+### Messages Inbox
+A live-updating list of all contact form submissions from **both** the Angular portfolio and the Flutter guest contact form. Powered by a Firestore `StreamBuilder` on `/contacts` ordered by timestamp descending.
+
+| Feature | Detail |
+|---|---|
+| **Unread dot** | Green dot on left of sender name for messages with `read: false` |
+| **Source badge** | `web` (Angular form) or `app` (Flutter guest) |
+| **Expand / collapse** | Tap any message to see the full text |
+| **Mark as read** | Automatically marks `read: true` on first open |
+| **Reply** | Tap "Copy email to reply" — copies sender's address to clipboard, shows a snackbar confirmation |
+
 ---
 
 ## Architecture
@@ -58,15 +90,17 @@ lib/
 ├── widgets/
 │   └── angular_logo.dart        # Angular shield logo (CustomPainter + glow anim)
 ├── screens/
-│   ├── splash_screen.dart       # Orbiting profile photos + Angular logo centre
-│   ├── create_admin_screen.dart # First-run: create the Firebase Auth admin user
-│   ├── login_screen.dart        # Email/password auth + forgot password + set-up link
-│   ├── home_screen.dart         # IndexedStack shell + animated bottom nav + auto-on trigger
-│   ├── portfolio_screen.dart    # WebView + ValueNotifier chrome + throttled scroll bridge
-│   ├── profile_screen.dart      # Native CV (all CV data lives here as const)
-│   └── dashboard_screen.dart    # Firestore admin controls (glass UI)
+│   ├── splash_screen.dart        # Orbiting profile photos + Angular logo centre
+│   ├── create_admin_screen.dart  # First-run: create the Firebase Auth admin user
+│   ├── login_screen.dart         # Entry screen: bold Admin / Guest choice, then admin login form
+│   ├── home_screen.dart          # Admin IndexedStack shell + animated bottom nav + auto-on trigger
+│   ├── guest_home_screen.dart    # Guest IndexedStack shell: Portfolio + Profile + Message tabs
+│   ├── guest_contact_screen.dart # Guest contact form → writes /contacts with source=flutter-guest
+│   ├── portfolio_screen.dart     # WebView + ValueNotifier chrome + throttled scroll bridge
+│   ├── profile_screen.dart       # Native CV (all CV data lives here as const)
+│   └── dashboard_screen.dart     # Firestore admin controls + live Messages inbox
 └── services/
-    └── portfolio_service.dart   # PortfolioSettings model + stream() / save() / toggle()
+    └── portfolio_service.dart    # PortfolioSettings model + stream() / save() / toggle()
 ```
 
 **Firestore document written by this app:**
@@ -112,17 +146,22 @@ All `GoogleFonts` `TextStyle` objects are created once as file-level `final` var
 
 ## Auth Flow
 
-### First-time setup
-On first launch the app checks Firestore `/portfolio/meta.admin_initialized`:
+### Entry screen
+When no user is signed in the app shows two large bold cards:
+- **Admin Login** → reveals the email/password form with a back button
+- **Browse as Guest** → navigates directly to `GuestHomeScreen` with no auth required
+
+### First-time admin setup
+On first launch (no prior admin) the app checks Firestore `/portfolio/meta.admin_initialized`:
 
 - `false` (or document missing) → **First-Time Setup** screen → enter email + password → creates Firebase Auth user → marks Firestore flag → navigates to login with credentials pre-filled → auto-proceeds to home
-- `true` → goes straight to **Login** screen
+- `true` → goes straight to the entry screen (Admin Login / Guest)
 - **Network error** → defaults to Login screen (safe — never shows create-admin if a user already exists)
 
-### Login screen
+### Admin login form
 - **Forgot password** — enter email, tap "Forgot password?" → Firebase sends a reset email
 - **No account found** — inline "Set up the admin account instead →" link appears when the email doesn't match any user
-- Keyboard is dismissed before the async auth call; an "Authenticating…" indicator appears during sign-in
+- Back arrow returns to the Admin / Guest choice screen
 
 ---
 
@@ -269,6 +308,19 @@ When `auto_on = true`:
 |---|---|---|
 | `admin_initialized` | `boolean` | Prevents the create-admin screen from showing on subsequent launches |
 | `admin_uid` | `string` | UID of the Firebase Auth admin user |
+
+### `/contacts/{id}` — written by Angular contact form + Flutter guest form
+
+| Field | Type | Written by | Description |
+|---|---|---|---|
+| `name` | `string` | both | Sender's display name |
+| `email` | `string` | both | Sender's email address |
+| `message` | `string` | both | Full message body |
+| `timestamp` | `Timestamp` | both | Server timestamp (used for inbox ordering) |
+| `source` | `string` | both | `angular` (from the web form) or `flutter-guest` (from the app) |
+| `read` | `boolean` | both | `false` on creation; set to `true` when opened in the admin Messages inbox |
+
+Firestore rules: `allow create` for everyone (public contact form); `allow read, update, delete` only for authenticated admin (so guest users cannot read the inbox, only submit).
 
 ---
 
