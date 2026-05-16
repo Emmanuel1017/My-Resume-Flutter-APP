@@ -19,11 +19,36 @@ const _injectCss = '''
     ::-webkit-scrollbar { display: none !important; }
     * { -webkit-tap-highlight-color: transparent; }
     app-navbar, nav.navbar, .navbar, header.site-header { display:none!important; }
-    body { padding-top:0!important; margin-top:0!important; overscroll-behavior:none; }
+    body {
+      padding-top:0!important; margin-top:0!important;
+      overscroll-behavior:none;
+      touch-action: pan-y;
+    }
+    html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
     section { scroll-margin-top:0!important; }
+
+    /* Skip off-screen rendering — biggest win on low-end */
+    app-about, app-skills, app-my-work, app-experience, app-contact {
+      content-visibility: auto;
+      contain-intrinsic-size: auto 700px;
+    }
+
+    /* Isolate layout/paint to each card so reflows don't cascade */
+    .work-card, .exp-card, .skill-item, .timeline-item, .contact-card {
+      contain: layout style;
+    }
+
+    /* GPU layers only on elements that genuinely animate */
+    .avatar-float, .avatar-tilt, .picture-stage,
+    .po, .pi, .ring-1, .ring-2, .ring-3 {
+      will-change: transform;
+    }
+
+    /* Native fast scroll path */
     html, body { -webkit-overflow-scrolling: touch; }
-    img, video, canvas, svg { transform: translateZ(0); }
-    .avatar-scene, .avatar-float, .planet-orbits { will-change: transform; }
+
+    /* Prevent layout shift from web fonts */
+    * { font-display: optional; }
   `;
   document.head.appendChild(s);
 })();
@@ -56,7 +81,18 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
     _ctrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(AppColors.bg)
+      ..setBackgroundColor(AppColors.bg);
+
+    // Android platform settings applied before first load so they take effect
+    // from the very first paint — not retroactively after the page loads.
+    if (Platform.isAndroid) {
+      final ac = _ctrl.platform as AndroidWebViewController;
+      ac
+        ..setMediaPlaybackRequiresUserGesture(false)
+        ..setTextZoom(100); // respect CSS font sizes exactly
+    }
+
+    _ctrl
       ..setNavigationDelegate(NavigationDelegate(
         onPageStarted: (_) {
           _progress.value = 0;
@@ -88,14 +124,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         },
       )
       ..loadRequest(Uri.parse(_portfolioUrl));
-
-    if (Platform.isAndroid) {
-      final androidCtrl = _ctrl.platform as AndroidWebViewController;
-      androidCtrl
-        ..setAlgorithmicDarkeningAllowed(false)
-        ..setMediaPlaybackRequiresUserGesture(false)
-        ..setTextZoom(100);
-    }
   }
 
   @override
