@@ -73,18 +73,8 @@ class _SplashScreenState extends State<SplashScreen>
                   child: Stack(
                     alignment: Alignment.center,
                     children: [
-                      // Centre glow
-                      Container(
-                        width: 100,
-                        height: 100,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(colors: [
-                            AppColors.primary.withOpacity(.35),
-                            AppColors.primary.withOpacity(0),
-                          ]),
-                        ),
-                      ),
+                      // Angular logo at centre
+                      const AngularLogoGlow(size: 72),
 
                       // Four orbiting photos
                       for (int i = 0; i < _photos.length; i++)

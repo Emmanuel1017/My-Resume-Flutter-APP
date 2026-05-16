@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../widgets/angular_logo.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -72,35 +73,11 @@ class _LoginScreenState extends State<LoginScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        // ── Logo / avatar ───────────────────────────────────
-                        Center(
-                          child: Container(
-                            width:  72,
-                            height: 72,
-                            decoration: BoxDecoration(
-                              shape:        BoxShape.circle,
-                              gradient:     const LinearGradient(
-                                colors: [AppColors.primary, AppColors.accent],
-                                begin:  Alignment.topLeft,
-                                end:    Alignment.bottomRight,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color:      AppColors.primary.withOpacity(.4),
-                                  blurRadius: 24,
-                                  spreadRadius: 2,
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.admin_panel_settings_rounded,
-                              color: Colors.white,
-                              size:  36,
-                            ),
-                          ),
-                        )
+                        // ── Angular logo ────────────────────────────────────
+                        const Center(child: AngularLogoGlow(size: 72))
                             .animate()
-                            .scale(delay: 100.ms, duration: 600.ms, curve: Curves.elasticOut),
+                            .scale(delay: 100.ms, duration: 600.ms,
+                                   curve: Curves.elasticOut),
 
                         const SizedBox(height: 28),
 
@@ -235,6 +212,20 @@ class _LoginScreenState extends State<LoginScreen> {
                             ],
                           ),
                         ).animate().fadeIn(delay: 250.ms, duration: 600.ms).slideY(begin: .08, end: 0),
+
+                        const SizedBox(height: 20),
+
+                        TextButton(
+                          onPressed: () => Navigator.of(context)
+                              .pushReplacementNamed('/create-admin'),
+                          child: Text(
+                            'First time? Create admin account',
+                            style: GoogleFonts.montserrat(
+                              fontSize: 13,
+                              color:    AppColors.textMid,
+                            ),
+                          ),
+                        ).animate().fadeIn(delay: 620.ms),
                       ],
                     ),
                   ),

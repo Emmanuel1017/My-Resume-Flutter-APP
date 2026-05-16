@@ -22,12 +22,15 @@ Connects to the same Firebase project as the Angular portfolio site.
 ```
 lib/
 ├── main.dart                    # Firebase init, orientation lock, system chrome
-├── app.dart                     # MaterialApp + AuthGate (auth stream → routes)
-├── firebase_options.dart        # NOT committed — generate with flutterfire CLI
+├── app.dart                     # MaterialApp + AuthGate (first-run check → routes)
+├── firebase_options.dart        # NOT committed — generate via script (see below)
 ├── theme/
 │   └── app_theme.dart           # Navy/green palette matching the portfolio
+├── widgets/
+│   └── angular_logo.dart        # Angular shield logo (CustomPainter + glow anim)
 ├── screens/
-│   ├── splash_screen.dart       # Orbiting profile photos + progress bar
+│   ├── splash_screen.dart       # Orbiting profile photos + Angular logo centre
+│   ├── create_admin_screen.dart # First-run: create the admin Firebase Auth user
 │   ├── login_screen.dart        # Firebase Auth email/password
 │   ├── home_screen.dart         # IndexedStack shell + animated bottom nav
 │   ├── portfolio_screen.dart    # WebView + native chrome + JS section bridge
@@ -54,41 +57,41 @@ The Angular portfolio reads this document via a real-time `onSnapshot` listener 
 
 ---
 
-## Connecting to the Angular portfolio's Firebase
+## Firebase setup (shared with Angular portfolio)
 
-Both apps share **one Firebase project**. The `projectId` must match in both.
+Both apps share **one Firebase project**. You only set it up once.
 
-### Step 1 — Find your project ID
+### Step 1 — Fill in the Angular `.env`
 
-Open `Angular-Resume/.env` (gitignored on that repo):
-
-```
-FIREBASE_PROJECT_ID=your-project-id
-```
-
-Or: [Firebase Console](https://console.firebase.google.com) → Project Settings → General → **Project ID**.
-
-### Step 2 — Generate `firebase_options.dart`
-
-**Recommended — FlutterFire CLI (automatic):**
+The Flutter admin reads Firebase credentials from the Angular portfolio's `.env`.
+Open `Angular-Resume/.env` (copy from `.env.example` if it doesn't exist):
 
 ```bash
-dart pub global activate flutterfire_cli
-cd portfolio-admin
-flutterfire configure          # select your existing project when prompted
+cd Angular-Resume
+cp .env.example .env   # then open .env and fill in the Firebase section
 ```
 
-This generates `lib/firebase_options.dart` and places `google-services.json` /
-`GoogleService-Info.plist` in the right platform folders automatically.
+Where to find the values:  
+[Firebase Console](https://console.firebase.google.com) → your project → ⚙️ Project Settings → General → **Your apps** → web app → copy the `firebaseConfig` values.
 
-**Manual alternative:**
+### Step 2 — Generate `firebase_options.dart` (one command)
 
-1. Console → Project Settings → General → **Your apps**
-2. Add an **Android** app: package `com.example.portfolio_admin`
-3. Add an **iOS** app: bundle ID `com.example.portfolioAdmin`
-4. Download `google-services.json` → `android/app/google-services.json`
-5. Download `GoogleService-Info.plist` → `ios/Runner/GoogleService-Info.plist`
-6. Fill in `lib/firebase_options.dart` (template already in the repo)
+```bash
+cd portfolio-admin
+dart scripts/gen_firebase_options.dart
+# reads ../Angular-Resume/.env and writes lib/firebase_options.dart
+```
+
+If your `.env` is somewhere else:
+```bash
+dart scripts/gen_firebase_options.dart --env=/path/to/.env
+```
+
+That's it — no manual copy-pasting. Both apps stay in sync automatically.
+
+> **For production** (proper native app IDs): run `flutterfire configure` instead.
+> This creates `google-services.json` / `GoogleService-Info.plist` with correct
+> Android/iOS app IDs registered in Firebase.
 
 ### Step 3 — Firestore security rules
 
@@ -106,10 +109,21 @@ service cloud.firestore {
 }
 ```
 
-### Step 4 — Create your admin account
+### Step 4 — Enable Email/Password auth
 
-1. Console → **Authentication** → Sign-in method → enable **Email/Password**
-2. Console → **Authentication** → **Users** → **Add user** → enter your email + password
+Console → **Authentication** → Sign-in method → enable **Email/Password**.  
+(You do **not** need to create a user manually — the app handles first-run setup itself.)
+
+### Step 5 — First run: create your admin account in the app
+
+On the very first launch, before any admin user exists, the app detects the
+uninitialized state and shows a **"First-Time Setup"** screen instead of login.
+
+1. Enter your email and a password (6+ characters)
+2. Tap **Create Admin Account**
+
+The app creates a Firebase Auth user and writes `portfolio/meta.admin_initialized = true`
+to Firestore. All future launches go straight to the login screen.
 
 ---
 
