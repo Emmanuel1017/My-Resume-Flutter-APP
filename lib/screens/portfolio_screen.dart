@@ -8,33 +8,25 @@ import '../theme/app_theme.dart';
 
 const _portfolioUrl = 'https://emmanuel1017.github.io/Angular-Resume/';
 
-// CSS injected to make the site feel native inside the app:
-// — hides the Angular sticky top nav (we provide our own in Flutter)
-// — kills scrollbars
-// — adjusts font rendering
+// ── JS injected once on page-finished ────────────────────────────────────────
+// Hides the Angular nav, kills scrollbars, removes overscroll bounce.
 const _injectCss = '''
 (function() {
-  var style = document.createElement('style');
-  style.textContent = `
+  var s = document.createElement('style');
+  s.textContent = `
     ::-webkit-scrollbar { display: none !important; }
     * { -webkit-tap-highlight-color: transparent; }
-    app-navbar, nav.navbar, .navbar, header.site-header {
-      display: none !important;
-    }
-    body {
-      padding-top: 0 !important;
-      margin-top:  0 !important;
-      overscroll-behavior: none;
-    }
-    section { scroll-margin-top: 0 !important; }
+    app-navbar, nav.navbar, .navbar, header.site-header { display:none!important; }
+    body { padding-top:0!important; margin-top:0!important; overscroll-behavior:none; }
+    section { scroll-margin-top:0!important; }
   `;
-  document.head.appendChild(style);
+  document.head.appendChild(s);
 })();
 ''';
 
-// Sections in the portfolio (for the bottom pill selector)
-const _sections = ['#home', '#about', '#skills', '#my-work', '#experience', '#contact'];
-const _sectionLabels = ['Home', 'About', 'Skills', 'Work', 'Exp', 'Contact'];
+// Section IDs — keep in sync with the Angular site
+const _sections      = ['#home','#about','#skills','#my-work','#experience','#contact'];
+const _sectionLabels = ['Home','About','Skills','Work','Exp','Contact'];
 
 class PortfolioScreen extends StatefulWidget {
   const PortfolioScreen({super.key});
@@ -46,11 +38,12 @@ class PortfolioScreen extends StatefulWidget {
 class _PortfolioScreenState extends State<PortfolioScreen> {
   late final WebViewController _ctrl;
 
-  int     _loadProgress  = 0;
-  bool    _loaded        = false;
-  bool    _canGoBack     = false;
-  int     _activeSection = 0;
-  bool    _showSections  = false;
+  // ValueNotifiers so only the small indicator widgets rebuild — never the WebViewWidget
+  final _progress       = ValueNotifier<int>(0);
+  final _loaded         = ValueNotifier<bool>(false);
+  final _canGoBack      = ValueNotifier<bool>(false);
+  final _activeSection  = ValueNotifier<int>(0);
+  final _showSections   = ValueNotifier<bool>(false);
 
   @override
   void initState() {
@@ -60,22 +53,19 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(AppColors.bg)
       ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (_) => setState(() {
-          _loadProgress = 0;
-          _loaded       = false;
-        }),
-        onProgress: (p) => setState(() => _loadProgress = p),
+        onPageStarted: (_) {
+          _progress.value = 0;
+          _loaded.value   = false;
+        },
+        // Only update the ValueNotifier — zero setState, zero rebuilds
+        onProgress: (p) => _progress.value = p,
         onPageFinished: (_) async {
           await _ctrl.runJavaScript(_injectCss);
           await _ctrl.runJavaScript(_buildScrollListener());
-          final canBack = await _ctrl.canGoBack();
-          setState(() {
-            _loaded   = true;
-            _canGoBack = canBack;
-          });
+          _canGoBack.value = await _ctrl.canGoBack();
+          _loaded.value    = true;
         },
         onNavigationRequest: (req) {
-          // Open external links in the system browser, keep portfolio in WebView
           if (!req.url.startsWith('https://emmanuel1017.github.io')) {
             launchUrl(Uri.parse(req.url), mode: LaunchMode.externalApplication);
             return NavigationDecision.prevent;
@@ -87,15 +77,26 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         'FlutterSection',
         onMessageReceived: (msg) {
           final idx = int.tryParse(msg.message);
-          if (idx != null && mounted) {
-            setState(() => _activeSection = idx);
+          if (idx != null && _activeSection.value != idx) {
+            _activeSection.value = idx;
           }
         },
       )
       ..loadRequest(Uri.parse(_portfolioUrl));
   }
 
-  // Injects a scroll listener that tells Flutter which section is in view
+  @override
+  void dispose() {
+    _progress.dispose();
+    _loaded.dispose();
+    _canGoBack.dispose();
+    _activeSection.dispose();
+    _showSections.dispose();
+    super.dispose();
+  }
+
+  // Throttled scroll observer: fires at most every 150 ms so the platform
+  // channel isn't hammered on every pixel scroll.
   String _buildScrollListener() {
     final ids = _sections
         .map((s) => s.replaceFirst('#', ''))
@@ -103,20 +104,23 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         .join(',');
     return '''
 (function() {
-  var ids = [$ids];
-  function update() {
+  var ids = [$ids], timer = null;
+  function compute() {
     var best = 0, bestVis = -1;
     ids.forEach(function(id, i) {
       var el = document.getElementById(id);
       if (!el) return;
-      var rect = el.getBoundingClientRect();
-      var vis = Math.max(0, Math.min(rect.bottom, window.innerHeight) - Math.max(rect.top, 0));
-      if (vis > bestVis) { bestVis = vis; best = i; }
+      var r = el.getBoundingClientRect();
+      var v = Math.max(0, Math.min(r.bottom, window.innerHeight) - Math.max(r.top, 0));
+      if (v > bestVis) { bestVis = v; best = i; }
     });
     FlutterSection.postMessage(String(best));
   }
-  window.addEventListener('scroll', update, { passive: true });
-  update();
+  window.addEventListener('scroll', function() {
+    if (timer) return;
+    timer = setTimeout(function() { timer = null; compute(); }, 150);
+  }, { passive: true });
+  compute();
 })();
 ''';
   }
@@ -128,11 +132,6 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
     );
   }
 
-  Future<void> _reload() async {
-    HapticFeedback.mediumImpact();
-    await _ctrl.reload();
-  }
-
   @override
   Widget build(BuildContext context) {
     final top = MediaQuery.of(context).padding.top;
@@ -140,65 +139,93 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       backgroundColor: AppColors.bg,
       body: Stack(
         children: [
-          // ── WebView ────────────────────────────────────────────────────────
-          WebViewWidget(controller: _ctrl),
+          // WebViewWidget never rebuilds — it sits outside all ValueListenableBuilders
+          WebViewWidget(
+            controller: _ctrl,
+            // Isolate the WebView from any ancestor repaints
+            key: const ValueKey('portfolio-webview'),
+          ),
 
-          // ── Top chrome ────────────────────────────────────────────────────
+          // Top chrome: progress bar updates independently of WebView
           Positioned(
-            top:   0,
-            left:  0,
-            right: 0,
-            child: _TopChrome(
-              paddingTop:   top,
-              progress:     _loadProgress,
-              loaded:       _loaded,
-              canGoBack:    _canGoBack,
-              onBack:       () => _ctrl.goBack(),
-              onReload:     _reload,
-              onSections:   () => setState(() => _showSections = !_showSections),
+            top: 0, left: 0, right: 0,
+            child: RepaintBoundary(
+              child: _TopChrome(
+                paddingTop:    top,
+                progressNotifier: _progress,
+                loadedNotifier:   _loaded,
+                canGoBackNotifier: _canGoBack,
+                onBack:   () => _ctrl.goBack(),
+                onReload: () { HapticFeedback.mediumImpact(); _ctrl.reload(); },
+                onSections: () =>
+                    _showSections.value = !_showSections.value,
+              ),
             ),
           ),
 
-          // ── Section pill strip ─────────────────────────────────────────────
-          if (_loaded)
-            Positioned(
-              bottom: 8,
-              left:   16,
-              right:  16,
-              child: _SectionBar(
-                visible:       _showSections,
-                activeSection: _activeSection,
-                onTap:         (i) => _scrollTo(_sections[i]),
+          // Section bar: only rebuilds when activeSection or showSections changes
+          Positioned(
+            bottom: 8, left: 16, right: 16,
+            child: RepaintBoundary(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _loaded,
+                builder: (_, loaded, __) {
+                  if (!loaded) return const SizedBox.shrink();
+                  return ValueListenableBuilder<bool>(
+                    valueListenable: _showSections,
+                    builder: (_, show, __) => ValueListenableBuilder<int>(
+                      valueListenable: _activeSection,
+                      builder: (_, active, __) => _SectionBar(
+                        visible:       show,
+                        activeSection: active,
+                        onTap: (i) => _scrollTo(_sections[i]),
+                      ),
+                    ),
+                  );
+                },
               ),
             ),
+          ),
 
-          // ── Initial loading overlay ────────────────────────────────────────
-          if (!_loaded)
-            Positioned.fill(
-              child: _LoadingOverlay(progress: _loadProgress),
+          // Loading overlay: disappears once loaded, no cost after that
+          RepaintBoundary(
+            child: ValueListenableBuilder<bool>(
+              valueListenable: _loaded,
+              builder: (_, loaded, __) {
+                if (loaded) return const SizedBox.shrink();
+                return Positioned.fill(
+                  child: ValueListenableBuilder<int>(
+                    valueListenable: _progress,
+                    builder: (_, prog, __) => _LoadingOverlay(progress: prog),
+                  ),
+                );
+              },
             ),
+          ),
         ],
       ),
     );
   }
 }
 
-// ─── Top chrome ──────────────────────────────────────────────────────────────
+// ─── Top chrome ───────────────────────────────────────────────────────────────
+// Uses ValueListenableBuilder internally — only the progress bar and back button
+// repaint when their notifiers change.
 
 class _TopChrome extends StatelessWidget {
-  final double paddingTop;
-  final int    progress;
-  final bool   loaded;
-  final bool   canGoBack;
-  final VoidCallback onBack;
-  final VoidCallback onReload;
-  final VoidCallback onSections;
+  final double              paddingTop;
+  final ValueNotifier<int>  progressNotifier;
+  final ValueNotifier<bool> loadedNotifier;
+  final ValueNotifier<bool> canGoBackNotifier;
+  final VoidCallback        onBack;
+  final VoidCallback        onReload;
+  final VoidCallback        onSections;
 
   const _TopChrome({
     required this.paddingTop,
-    required this.progress,
-    required this.loaded,
-    required this.canGoBack,
+    required this.progressNotifier,
+    required this.loadedNotifier,
+    required this.canGoBackNotifier,
     required this.onBack,
     required this.onReload,
     required this.onSections,
@@ -212,10 +239,7 @@ class _TopChrome extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end:   Alignment.bottomCenter,
-          colors: [
-            AppColors.bg,
-            AppColors.bg.withOpacity(.0),
-          ],
+          colors: [AppColors.bg, AppColors.bg.withOpacity(0)],
           stops: const [.72, 1.0],
         ),
       ),
@@ -226,18 +250,17 @@ class _TopChrome extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               children: [
-                // Back button (only shown when WebView can go back)
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
-                  opacity:  canGoBack ? 1 : 0,
-                  child: _ChromeBtn(
-                    icon:  Icons.arrow_back_ios_new_rounded,
-                    onTap: onBack,
+                // Back button — only repaints when canGoBack changes
+                ValueListenableBuilder<bool>(
+                  valueListenable: canGoBackNotifier,
+                  builder: (_, canBack, __) => AnimatedOpacity(
+                    duration: const Duration(milliseconds: 200),
+                    opacity:  canBack ? 1.0 : 0.0,
+                    child: _ChromeBtn(icon: Icons.arrow_back_ios_new_rounded, onTap: onBack),
                   ),
                 ),
                 const SizedBox(width: 6),
-
-                // URL pill
+                // URL pill — static, never rebuilds
                 Expanded(
                   child: Container(
                     height:     34,
@@ -248,50 +271,48 @@ class _TopChrome extends StatelessWidget {
                       border:       Border.all(color: AppColors.border),
                     ),
                     alignment: Alignment.centerLeft,
-                    child: Row(
-                      children: [
-                        Icon(Icons.lock_rounded,
-                            color: AppColors.accent, size: 11),
-                        const SizedBox(width: 6),
-                        Text(
-                          'emmanuel1017.github.io',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 11.5,
-                            color:    AppColors.textMid,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
+                    child: Row(children: [
+                      const Icon(Icons.lock_rounded, color: AppColors.accent, size: 11),
+                      const SizedBox(width: 6),
+                      Text('emmanuel1017.github.io',
+                        style: GoogleFonts.montserrat(
+                          fontSize: 11.5, color: AppColors.textMid,
+                          fontWeight: FontWeight.w500)),
+                    ]),
                   ),
                 ),
-
                 const SizedBox(width: 6),
-                _ChromeBtn(
-                  icon:  Icons.menu_rounded,
-                  onTap: onSections,
-                ),
+                _ChromeBtn(icon: Icons.menu_rounded,    onTap: onSections),
                 const SizedBox(width: 4),
-                _ChromeBtn(
-                  icon:  loaded
-                      ? Icons.refresh_rounded
-                      : Icons.close_rounded,
-                  onTap: onReload,
+                // Reload/stop icon — repaints when loaded changes
+                ValueListenableBuilder<bool>(
+                  valueListenable: loadedNotifier,
+                  builder: (_, loaded, __) => _ChromeBtn(
+                    icon:  loaded ? Icons.refresh_rounded : Icons.close_rounded,
+                    onTap: onReload,
+                  ),
                 ),
               ],
             ),
           ),
-
-          // Thin progress bar
-          if (!loaded)
-            SizedBox(
-              height: 2,
-              child:  LinearProgressIndicator(
-                value:           progress / 100,
-                backgroundColor: Colors.transparent,
-                valueColor:      const AlwaysStoppedAnimation(AppColors.accent),
-              ),
-            ),
+          // Progress bar — repaints on every progress tick, but only this widget
+          ValueListenableBuilder<bool>(
+            valueListenable: loadedNotifier,
+            builder: (_, loaded, __) {
+              if (loaded) return const SizedBox.shrink();
+              return ValueListenableBuilder<int>(
+                valueListenable: progressNotifier,
+                builder: (_, prog, __) => SizedBox(
+                  height: 2,
+                  child:  LinearProgressIndicator(
+                    value:           prog / 100,
+                    backgroundColor: Colors.transparent,
+                    valueColor: const AlwaysStoppedAnimation(AppColors.accent),
+                  ),
+                ),
+              );
+            },
+          ),
         ],
       ),
     );
@@ -299,29 +320,26 @@ class _TopChrome extends StatelessWidget {
 }
 
 class _ChromeBtn extends StatelessWidget {
-  final IconData icon;
+  final IconData     icon;
   final VoidCallback onTap;
   const _ChromeBtn({required this.icon, required this.onTap});
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width:      36,
-        height:     36,
-        decoration: BoxDecoration(
-          color:        AppColors.surface.withOpacity(.92),
-          shape:        BoxShape.circle,
-          border:       Border.all(color: AppColors.border),
-        ),
-        child: Icon(icon, color: AppColors.textMid, size: 16),
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 36, height: 36,
+      decoration: BoxDecoration(
+        color:  AppColors.surface.withOpacity(.92),
+        shape:  BoxShape.circle,
+        border: Border.all(color: AppColors.border),
       ),
-    );
-  }
+      child: Icon(icon, color: AppColors.textMid, size: 16),
+    ),
+  );
 }
 
-// ─── Section pill strip ──────────────────────────────────────────────────────
+// ─── Section pill strip ───────────────────────────────────────────────────────
 
 class _SectionBar extends StatelessWidget {
   final bool    visible;
@@ -343,7 +361,7 @@ class _SectionBar extends StatelessWidget {
         duration: const Duration(milliseconds: 250),
         opacity:  visible ? 1.0 : 0.0,
         child: Container(
-          padding:    const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
           decoration: BoxDecoration(
             color:        AppColors.surface.withOpacity(.96),
             borderRadius: BorderRadius.circular(28),
@@ -351,9 +369,7 @@ class _SectionBar extends StatelessWidget {
             boxShadow: [
               BoxShadow(
                 color:      Colors.black.withOpacity(.3),
-                blurRadius: 16,
-                offset:     const Offset(0, 4),
-              ),
+                blurRadius: 16, offset: const Offset(0, 4)),
             ],
           ),
           child: Row(
@@ -365,26 +381,22 @@ class _SectionBar extends StatelessWidget {
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 220),
                   padding:  EdgeInsets.symmetric(
-                    horizontal: active ? 12 : 8,
-                    vertical:   5,
-                  ),
+                      horizontal: active ? 12 : 8, vertical: 5),
                   decoration: BoxDecoration(
-                    color:        active
+                    color: active
                         ? AppColors.primary.withOpacity(.25)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(16),
-                    border:       active
+                    border: active
                         ? Border.all(color: AppColors.primary.withOpacity(.5))
                         : null,
                   ),
-                  child: Text(
-                    _sectionLabels[i],
+                  child: Text(_sectionLabels[i],
                     style: GoogleFonts.montserrat(
                       fontSize:   11,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       color:      active ? AppColors.accent : AppColors.textMid,
-                    ),
-                  ),
+                    )),
                 ),
               );
             }),
@@ -395,7 +407,7 @@ class _SectionBar extends StatelessWidget {
   }
 }
 
-// ─── Loading overlay ─────────────────────────────────────────────────────────
+// ─── Loading overlay ──────────────────────────────────────────────────────────
 
 class _LoadingOverlay extends StatelessWidget {
   final int progress;
@@ -409,12 +421,10 @@ class _LoadingOverlay extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Animated logo
             Container(
-              width:  64,
-              height: 64,
+              width: 64, height: 64,
               decoration: BoxDecoration(
-                shape:    BoxShape.circle,
+                shape: BoxShape.circle,
                 gradient: const LinearGradient(
                   colors: [AppColors.primary, AppColors.accent],
                   begin:  Alignment.topLeft,
@@ -423,15 +433,13 @@ class _LoadingOverlay extends StatelessWidget {
                 boxShadow: [
                   BoxShadow(
                     color:      AppColors.primary.withOpacity(.4),
-                    blurRadius: 24,
-                  ),
+                    blurRadius: 24),
                 ],
               ),
-              child: const Icon(Icons.language_rounded,
-                  color: Colors.white, size: 30),
+              child: const Icon(Icons.language_rounded, color: Colors.white, size: 30),
             )
-                .animate(onPlay: (c) => c.repeat())
-                .shimmer(duration: 1200.ms, color: AppColors.accent.withOpacity(.4)),
+              .animate(onPlay: (c) => c.repeat())
+              .shimmer(duration: 1200.ms, color: AppColors.accent.withOpacity(.4)),
 
             const SizedBox(height: 28),
 
@@ -442,20 +450,15 @@ class _LoadingOverlay extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value:           progress / 100,
                   backgroundColor: AppColors.border,
-                  valueColor:      const AlwaysStoppedAnimation(AppColors.accent),
-                  minHeight:       3,
+                  valueColor: const AlwaysStoppedAnimation(AppColors.accent),
+                  minHeight: 3,
                 ),
               ),
             ),
-
             const SizedBox(height: 14),
-            Text(
-              'Loading portfolio…',
+            Text('Loading portfolio…',
               style: GoogleFonts.montserrat(
-                fontSize: 12,
-                color:    AppColors.textMid,
-              ),
-            ),
+                fontSize: 12, color: AppColors.textMid)),
           ],
         ),
       ),
