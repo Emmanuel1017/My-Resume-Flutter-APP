@@ -5,6 +5,7 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/create_admin_screen.dart';
 import 'screens/home_screen.dart';
+import 'screens/guest_home_screen.dart';
 import 'theme/app_theme.dart';
 
 class PortfolioAdminApp extends StatelessWidget {
@@ -23,6 +24,7 @@ class PortfolioAdminApp extends StatelessWidget {
         '/login':         (_) => const LoginScreen(),
         '/create-admin':  (_) => const CreateAdminScreen(),
         '/home':          (_) => const HomeScreen(),
+        '/guest':         (_) => const GuestHomeScreen(),
       },
     );
   }
