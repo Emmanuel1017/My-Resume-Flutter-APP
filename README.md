@@ -2,8 +2,8 @@
 
 > Mobile admin panel + portfolio viewer for [Emmanuel1017/Angular-Resume](https://github.com/Emmanuel1017/Angular-Resume).
 
-Built with Flutter. Runs on **iOS** and **Android**.  
-Connects to the same Firebase project as the Angular portfolio site.
+Built with **Flutter**. Runs on **iOS** and **Android**.  
+Connects to the same Firebase project as the Angular portfolio site — changes appear on the live site within ~1 second, no redeploy ever needed.
 
 ---
 
@@ -11,9 +11,38 @@ Connects to the same Firebase project as the Angular portfolio site.
 
 | Tab | Description |
 |-----|-------------|
-| **Portfolio** | WebView of the live site (`emmanuel1017.github.io/Angular-Resume`) with a native URL bar, animated section-jump pill strip, and JS injection that hides the Angular navbar so the experience feels fully native |
-| **Profile** | Native Flutter CV — parallax 3-D name letters, auto-cycling skill tabs (6 groups, same colours as the site), tap-to-expand experience timeline, education card, certifications |
-| **Admin** | Glass-morphic Firestore controls — availability hero toggle (with pulse animation), contact form / maintenance mode / auto-on switches (each with description), featured message & Kori greeting editors with character counters, live Firestore state preview in monospace |
+| **Portfolio** | WebView of the live site with a native URL bar, animated section-jump pill strip, and JS injection that hides the Angular navbar so the experience feels fully native. Progress indicator and back-navigation are implemented with `ValueNotifier` so the WebView itself is never rebuilt during load or scroll. |
+| **Profile** | Native Flutter CV — parallax 3-D name letters, auto-cycling skill tabs (6 groups, same colours as the Angular site), tap-to-expand experience timeline, education card, certifications |
+| **Admin** | Glassmorphic Firestore control centre — animated availability hero card (pulsing dot, gradient glow), per-control description labels, char-counted message editors, live Firestore state preview in monospace, sign-out that navigates back to login |
+
+---
+
+## Admin Dashboard — Feature Reference
+
+### Availability Hero
+Large tappable card at the top of the Admin tab. Tapping toggles `available_for_work` in Firestore. The card colour, border glow, and dot pulse all animate between green (available) and red (unavailable) with a 500 ms spring.
+
+When **Auto On** is enabled an `⚡ Auto On active` badge appears below the sub-label.
+
+### Site Controls
+
+| Control | Firestore field | Description |
+|---|---|---|
+| Contact Form | `contact_open` | Allow/block visitors from submitting the contact form. When off, the form is hidden and a themed dark card with a direct email link is shown instead. |
+| Maintenance Mode | `maintenance_mode` | Replaces the entire Angular portfolio with a fullscreen maintenance overlay. An amber inline warning appears in the app when this is active so you can't accidentally leave it on. |
+| Auto On | `auto_on` | When enabled, either app opening automatically sets `available_for_work = true`. Flutter fires on `HomeScreen.initState`; Angular fires on its first Firestore snapshot. |
+
+### Broadcasts
+
+| Field | Char limit | Effect |
+|---|---|---|
+| Featured Banner | 120 | A floating glass pill banner appears just below the Angular navbar across every page. Leave blank to hide it. Slides in with a spring animation. |
+| Kori's Opening Line | 160 | Overrides Kori's first chat bubble on the portfolio. Leave blank for the default greeting. |
+
+A **Save Changes** button appears (with animated entry) only when either text field is dirty. It shows a spinner during the Firestore write and disappears with a SnackBar confirmation once saved.
+
+### Live State Preview
+A monospace card at the bottom shows the current Firestore values exactly as stored (`available_for_work: true`, `auto_on: false`, etc.) with a pulsing dot indicating live/connecting status.
 
 ---
 
@@ -25,19 +54,19 @@ lib/
 ├── app.dart                     # MaterialApp + AuthGate (first-run check → routes)
 ├── firebase_options.dart        # NOT committed — generate via script (see below)
 ├── theme/
-│   └── app_theme.dart           # Navy/green palette matching the portfolio
+│   └── app_theme.dart           # Navy/green palette — bg #0D1321, accent #A8E87A
 ├── widgets/
 │   └── angular_logo.dart        # Angular shield logo (CustomPainter + glow anim)
 ├── screens/
 │   ├── splash_screen.dart       # Orbiting profile photos + Angular logo centre
-│   ├── create_admin_screen.dart # First-run: create the admin Firebase Auth user
-│   ├── login_screen.dart        # Firebase Auth email/password + forgot password
-│   ├── home_screen.dart         # IndexedStack shell + animated bottom nav
-│   ├── portfolio_screen.dart    # WebView + native chrome + JS section bridge
-│   ├── profile_screen.dart      # Native CV (all CV data lives here)
-│   └── dashboard_screen.dart    # Firestore admin controls
+│   ├── create_admin_screen.dart # First-run: create the Firebase Auth admin user
+│   ├── login_screen.dart        # Email/password auth + forgot password + set-up link
+│   ├── home_screen.dart         # IndexedStack shell + animated bottom nav + auto-on trigger
+│   ├── portfolio_screen.dart    # WebView + ValueNotifier chrome + throttled scroll bridge
+│   ├── profile_screen.dart      # Native CV (all CV data lives here as const)
+│   └── dashboard_screen.dart    # Firestore admin controls (glass UI)
 └── services/
-    └── portfolio_service.dart   # Reads/writes /portfolio/settings in Firestore
+    └── portfolio_service.dart   # PortfolioSettings model + stream() / save() / toggle()
 ```
 
 **Firestore document written by this app:**
@@ -47,34 +76,57 @@ lib/
   available_for_work : boolean   ← Available badge on the Angular About section
   contact_open       : boolean   ← Enables/disables the contact form
   maintenance_mode   : boolean   ← Replaces entire Angular site with maintenance page
-  featured_message   : string    ← Sticky banner at top of every page (empty = hidden)
+  featured_message   : string    ← Glass pill banner below navbar (empty = hidden)
   kori_greeting      : string    ← Overrides Kori AI cat's opening bubble text
   auto_on            : boolean   ← Auto-set available_for_work=true when either app opens
 }
 ```
 
-The Angular portfolio reads this document via a real-time `onSnapshot` listener in
-`PortfolioSettingsService` (shared across all components). Changes appear on the live
-site within ~1 second, no redeploy needed.
+The Angular portfolio reads this document via a single real-time `onSnapshot` listener in `PortfolioSettingsService` — a singleton service injected once, shared across all components.
 
 ---
 
-## Auth flow
+## Performance Design
+
+### WebView (`portfolio_screen.dart`)
+All mutable UI state uses `ValueNotifier<T>` instead of `setState` so the `WebViewWidget` itself is never rebuilt:
+
+| Notifier | What updates |
+|---|---|
+| `_progress` | Progress bar only (2 px element) |
+| `_loaded` | Loading overlay + reload icon |
+| `_canGoBack` | Back-button opacity |
+| `_activeSection` | Section pill highlight |
+| `_showSections` | Pill strip slide/opacity |
+
+The JS scroll observer is **throttled to 150 ms** via `setTimeout` — reduces platform-channel messages ~10× while scrolling vs firing on every pixel.
+
+### Admin Dashboard (`dashboard_screen.dart`)
+`BackdropFilter` (GPU blur) is used for **one element only** — the hero availability card — because it is the focal point and there is exactly one instance on screen. All other cards use `_GlassCard`, which achieves the same frosted look via gradient + border + semi-transparency with zero compositing cost.
+
+Animated elements (`_PulsingDot`, `_LiveDot`) that tick every frame are wrapped in `RepaintBoundary` so their per-frame paints are isolated and don't invalidate parent layers.
+
+All `GoogleFonts` `TextStyle` objects are created once as file-level `final` variables, not on every `build()` call.
+
+---
+
+## Auth Flow
 
 ### First-time setup
 On first launch the app checks Firestore `/portfolio/meta.admin_initialized`:
 
 - `false` (or document missing) → **First-Time Setup** screen → enter email + password → creates Firebase Auth user → marks Firestore flag → navigates to login with credentials pre-filled → auto-proceeds to home
 - `true` → goes straight to **Login** screen
-- Network error → defaults to Login screen (safe — never shows create-admin if a user already exists)
+- **Network error** → defaults to Login screen (safe — never shows create-admin if a user already exists)
 
 ### Login screen
 - **Forgot password** — enter email, tap "Forgot password?" → Firebase sends a reset email
-- **No account found** — an inline "Set up the admin account instead →" link appears when the email doesn't match any user
+- **No account found** — inline "Set up the admin account instead →" link appears when the email doesn't match any user
+- Keyboard is dismissed before the async auth call; an "Authenticating…" indicator appears during sign-in
 
 ---
 
-## Firebase setup (shared with Angular portfolio)
+## Firebase Setup (shared with Angular portfolio)
 
 Both apps share **one Firebase project**. You only set it up once.
 
@@ -85,7 +137,7 @@ cd Angular-Resume
 cp .env.example .env   # then open .env and fill in the Firebase section
 ```
 
-Where to find the values:  
+Where to find the values:
 [Firebase Console](https://console.firebase.google.com) → your project → ⚙️ Project Settings → General → **Your apps** → web app → copy the `firebaseConfig` values.
 
 ### Step 2 — Generate `firebase_options.dart` (one command)
@@ -140,7 +192,7 @@ All future launches go straight to the login screen.
 
 ---
 
-## Running locally
+## Running Locally
 
 ```bash
 # 1. Generate the platform folders (only once, won't overwrite lib/)
@@ -161,16 +213,20 @@ flutter pub get
 flutter run
 ```
 
-> **Windows / Claude Code users:** the default pub cache is virtualised. Use:
-> ```bash
-> PUB_CACHE="$HOME/pub_cache" flutter pub get
-> PUB_CACHE="$HOME/pub_cache" flutter run -d <device-id>
+> **Windows users:** the default pub cache path may be virtualised. Use the included `run.bat` wrapper which sets `PUB_CACHE` to a real filesystem path automatically:
+> ```bat
+> run.bat run -d <device-id>
 > ```
-> or the included `run.bat` wrapper which sets this automatically.
+> Or set it manually:
+> ```powershell
+> $env:PUB_CACHE = "$env:USERPROFILE\pub_cache"
+> flutter pub get
+> flutter run -d <device-id>
+> ```
 
 ---
 
-## Firebase variables reference
+## Firebase Variables Reference
 
 All values come from Firebase Console → your project → ⚙️ Project Settings → General → Your apps → web app.
 
@@ -189,35 +245,37 @@ All values come from Firebase Console → your project → ⚙️ Project Settin
 
 ---
 
-## Firestore document reference
+## Firestore Document Reference
 
 ### `/portfolio/settings` — written by Admin tab, read by Angular site in real-time
 
 | Field | Type | Admin UI control | Angular effect |
 |---|---|---|---|
-| `available_for_work` | `boolean` | Hero toggle (pulsing dot) | Green/red badge on About photo |
-| `contact_open` | `boolean` | Contact Form switch | Enables/disables contact form |
-| `maintenance_mode` | `boolean` | Maintenance switch | Full-screen overlay replaces site |
-| `featured_message` | `string` | Text field (120 char limit) | Sticky top banner (empty = hidden) |
-| `kori_greeting` | `string` | Text field (160 char limit) | Kori's opening chat bubble |
-| `auto_on` | `boolean` | Auto On switch | — (write-side only) |
+| `available_for_work` | `boolean` | Hero toggle (animated pulsing dot) | Green/red badge on About photo |
+| `contact_open` | `boolean` | Contact Form switch | Hides form + shows dark closed-banner with email link |
+| `maintenance_mode` | `boolean` | Maintenance switch | Full-screen overlay replaces entire site |
+| `featured_message` | `string` | Text field (120 char, char counter) | Glass pill banner below navbar (empty = hidden) |
+| `kori_greeting` | `string` | Text field (160 char, char counter) | Kori's opening chat bubble |
+| `auto_on` | `boolean` | Auto On switch | Auto-sets `available_for_work = true` on first snapshot |
 
-**Auto On behaviour:** when `auto_on = true`, opening the Flutter admin app (`HomeScreen.initState`) or loading the Angular portfolio (`PortfolioSettingsService` first snapshot) automatically writes `available_for_work = true` back to Firestore. Useful when you open either app as a signal that you are active and available.
+### Auto On behaviour
+When `auto_on = true`:
+- **Flutter**: `HomeScreen.initState` reads the first stream emission and calls `toggle('available_for_work', true)` before the first frame renders
+- **Angular**: `PortfolioSettingsService` fires `setDoc({ available_for_work: true }, { merge: true })` on its first Firestore snapshot, guarded by a `autoOnFired` flag so it only runs once per page load
 
-### `/portfolio/meta` — written by the app on first-run setup
+### `/portfolio/meta` — written on first-run setup
 
 | Field | Type | Purpose |
 |---|---|---|
-| `admin_initialized` | `boolean` | Prevents the create-admin screen from showing again |
+| `admin_initialized` | `boolean` | Prevents the create-admin screen from showing on subsequent launches |
 | `admin_uid` | `string` | UID of the Firebase Auth admin user |
 
 ---
 
-## Keeping CV data in sync
+## Keeping CV Data in Sync
 
 The Profile tab mirrors the Angular About section.  
-When you update your CV in the Angular repo (`about.component.ts` — `stats`, `skillGroups`, `timeline`),
-update the matching constants at the top of `lib/screens/profile_screen.dart` as well:
+When you update your CV in the Angular repo (`about.component.ts` — `stats`, `skillGroups`, `timeline`), update the matching constants at the top of `lib/screens/profile_screen.dart`:
 
 | Angular (`about.component.ts`) | Flutter (`profile_screen.dart`) |
 |---|---|
@@ -230,8 +288,9 @@ update the matching constants at the top of `lib/screens/profile_screen.dart` as
 ## Notes
 
 - The WebView injects CSS on `onPageFinished` to hide the Angular sticky nav; if the Angular site changes its nav selector update `_injectCss` in `portfolio_screen.dart`
-- Toggling **Maintenance Mode** in the Admin tab updates Firestore; the Angular site reflects the change in real-time via `PortfolioSettingsService` — no redeploy needed
-- For production: run `flutterfire configure` to register a proper native Android/iOS app ID in Firebase and generate `google-services.json`
+- Toggling **Maintenance Mode** in the Admin tab updates Firestore instantly — the Angular site reflects the change via `PortfolioSettingsService` with no redeploy
+- For production: run `flutterfire configure` to register a proper native Android/iOS app ID in Firebase and regenerate `google-services.json` / `GoogleService-Info.plist`
+- The `android/`, `ios/`, `web/`, `linux/`, `macos/`, `windows/`, and `test/` directories are not committed — regenerate them with `flutter create . --project-name portfolio_admin`
 
 ---
 
