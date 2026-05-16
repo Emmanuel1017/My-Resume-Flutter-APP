@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../theme/app_theme.dart';
 
 const _portfolioUrl = 'https://emmanuel1017.github.io/Angular-Resume/';
@@ -19,6 +21,9 @@ const _injectCss = '''
     app-navbar, nav.navbar, .navbar, header.site-header { display:none!important; }
     body { padding-top:0!important; margin-top:0!important; overscroll-behavior:none; }
     section { scroll-margin-top:0!important; }
+    html, body { -webkit-overflow-scrolling: touch; }
+    img, video, canvas, svg { transform: translateZ(0); }
+    .avatar-scene, .avatar-float, .planet-orbits { will-change: transform; }
   `;
   document.head.appendChild(s);
 })();
@@ -83,6 +88,14 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
         },
       )
       ..loadRequest(Uri.parse(_portfolioUrl));
+
+    if (Platform.isAndroid) {
+      final androidCtrl = _ctrl.platform as AndroidWebViewController;
+      androidCtrl
+        ..setAlgorithmicDarkeningAllowed(false)
+        ..setMediaPlaybackRequiresUserGesture(false)
+        ..setTextZoom(100);
+    }
   }
 
   @override
