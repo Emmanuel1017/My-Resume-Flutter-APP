@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../widgets/angular_logo.dart';
 
 // Profile photos hosted on GitHub Pages
 const _photos = [
@@ -74,7 +75,7 @@ class _SplashScreenState extends State<SplashScreen>
                     alignment: Alignment.center,
                     children: [
                       // Angular logo at centre
-                      const AngularLogoGlow(size: 72),
+                      AngularLogoGlow(size: 72),
 
                       // Four orbiting photos
                       for (int i = 0; i < _photos.length; i++)

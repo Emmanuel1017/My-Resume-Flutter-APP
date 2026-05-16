@@ -35,7 +35,11 @@ class PortfolioAdminApp extends StatelessWidget {
 class _AuthGate extends StatelessWidget {
   const _AuthGate();
 
-  Future<bool> _adminInitialized() async {
+  /// Returns true  → admin exists, show /login
+  ///         false → no admin yet, show /create-admin
+  ///         null  → network error; default to /login so we never accidentally
+  ///                 show create-admin when a user already exists
+  Future<bool?> _adminInitialized() async {
     try {
       final doc = await FirebaseFirestore.instance
           .collection('portfolio')
@@ -43,7 +47,7 @@ class _AuthGate extends StatelessWidget {
           .get();
       return doc.data()?['admin_initialized'] == true;
     } catch (_) {
-      return false; // network error → assume not initialized, show create screen
+      return null;
     }
   }
 
@@ -71,10 +75,10 @@ class _AuthGate extends StatelessWidget {
         }
 
         // Not signed in — check whether any admin account exists
-        return FutureBuilder<bool>(
+        return FutureBuilder<bool?>(
           future: _adminInitialized(),
           builder: (context, initSnap) {
-            if (!initSnap.hasData) {
+            if (!initSnap.hasData && initSnap.connectionState != ConnectionState.done) {
               return const Scaffold(
                 backgroundColor: AppColors.bg,
                 body: Center(
@@ -84,10 +88,10 @@ class _AuthGate extends StatelessWidget {
               );
             }
 
+            // null (network error) or true → show login; false → first-time setup
+            final route = (initSnap.data == false) ? '/create-admin' : '/login';
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              Navigator.of(context).pushReplacementNamed(
-                initSnap.data! ? '/login' : '/create-admin',
-              );
+              Navigator.of(context).pushReplacementNamed(route);
             });
 
             return const Scaffold(backgroundColor: AppColors.bg);

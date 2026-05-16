@@ -17,9 +17,31 @@ class _LoginScreenState extends State<LoginScreen> {
   final _password = TextEditingController();
   final _form     = GlobalKey<FormState>();
 
-  bool _loading   = false;
-  bool _obscure   = true;
+  bool    _loading        = false;
+  bool    _obscure        = true;
+  bool    _argsLoaded     = false;
+  bool    _showNoUserHint = false;
   String? _error;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_argsLoaded) return;
+    _argsLoaded = true;
+
+    final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
+    if (args != null) {
+      if (args['email'] != null)    _email.text    = args['email']    as String;
+      if (args['password'] != null) _password.text = args['password'] as String;
+    }
+
+    // Already authenticated (just created account) → go straight to home
+    if (FirebaseAuth.instance.currentUser != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pushReplacementNamed('/home');
+      });
+    }
+  }
 
   @override
   void dispose() {
@@ -30,24 +52,49 @@ class _LoginScreenState extends State<LoginScreen> {
 
   Future<void> _login() async {
     if (!(_form.currentState?.validate() ?? false)) return;
-    setState(() { _loading = true; _error = null; });
+    setState(() { _loading = true; _error = null; _showNoUserHint = false; });
 
     try {
       await FirebaseAuth.instance.signInWithEmailAndPassword(
         email:    _email.text.trim(),
         password: _password.text,
       );
-      // AuthGate will handle navigation on stream update
+      if (mounted) Navigator.of(context).pushReplacementNamed('/home');
     } on FirebaseAuthException catch (e) {
+      final noUser = e.code == 'user-not-found' || e.code == 'invalid-credential';
       setState(() {
+        _showNoUserHint = noUser;
         _error = switch (e.code) {
-          'user-not-found'  => 'No account found for that email.',
-          'wrong-password'  => 'Incorrect password.',
-          'invalid-email'   => 'Please enter a valid email address.',
-          'too-many-requests' => 'Too many attempts. Try again later.',
-          _                 => e.message ?? 'Authentication failed.',
+          'user-not-found'     => 'No account found for that email.',
+          'invalid-credential' => 'Incorrect email or password.',
+          'wrong-password'     => 'Incorrect password.',
+          'invalid-email'      => 'Please enter a valid email address.',
+          'too-many-requests'  => 'Too many attempts. Try again later.',
+          _                    => e.message ?? 'Authentication failed.',
         };
       });
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _forgotPassword() async {
+    final email = _email.text.trim();
+    if (email.isEmpty || !email.contains('@')) {
+      setState(() => _error = 'Enter your email address above, then tap Forgot Password.');
+      return;
+    }
+    setState(() { _loading = true; _error = null; });
+    try {
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Reset link sent to $email'),
+          backgroundColor: const Color(0xFF1A4731),
+        ));
+      }
+    } on FirebaseAuthException catch (e) {
+      setState(() => _error = e.message ?? 'Could not send reset email.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -191,6 +238,25 @@ class _LoginScreenState extends State<LoginScreen> {
                                     ],
                                   ),
                                 ).animate().shakeX(duration: 400.ms),
+
+                                // "No account found" → offer create-admin link
+                                if (_showNoUserHint) ...[
+                                  const SizedBox(height: 8),
+                                  GestureDetector(
+                                    onTap: () => Navigator.of(context)
+                                        .pushReplacementNamed('/create-admin'),
+                                    child: Text(
+                                      'Set up the admin account instead →',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.montserrat(
+                                        fontSize: 12,
+                                        color: AppColors.accent,
+                                        decoration: TextDecoration.underline,
+                                        decorationColor: AppColors.accent,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
 
                               const SizedBox(height: 24),
@@ -209,6 +275,24 @@ class _LoginScreenState extends State<LoginScreen> {
                                       )
                                     : const Text('Sign In'),
                               ).animate().fadeIn(delay: 550.ms),
+
+                              // Forgot password
+                              const SizedBox(height: 8),
+                              TextButton(
+                                onPressed: _loading ? null : _forgotPassword,
+                                style: TextButton.styleFrom(
+                                  padding: EdgeInsets.zero,
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                child: Text(
+                                  'Forgot password?',
+                                  style: GoogleFonts.montserrat(
+                                    fontSize: 12,
+                                    color:    AppColors.textMid,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ).animate().fadeIn(delay: 250.ms, duration: 600.ms).slideY(begin: .08, end: 0),

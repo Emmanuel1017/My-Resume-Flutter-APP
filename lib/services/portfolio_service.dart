@@ -6,6 +6,7 @@ class PortfolioSettings {
   final bool maintenanceMode;
   final String featuredMessage;
   final String koriGreeting;
+  final bool autoOn;
 
   const PortfolioSettings({
     this.availableForWork = true,
@@ -13,6 +14,7 @@ class PortfolioSettings {
     this.maintenanceMode = false,
     this.featuredMessage = '',
     this.koriGreeting = '',
+    this.autoOn = false,
   });
 
   factory PortfolioSettings.fromMap(Map<String, dynamic> m) =>
@@ -22,6 +24,7 @@ class PortfolioSettings {
         maintenanceMode:  m['maintenance_mode']   as bool? ?? false,
         featuredMessage:  m['featured_message']   as String? ?? '',
         koriGreeting:     m['kori_greeting']      as String? ?? '',
+        autoOn:           m['auto_on']            as bool? ?? false,
       );
 
   Map<String, dynamic> toMap() => {
@@ -30,6 +33,7 @@ class PortfolioSettings {
     'maintenance_mode':   maintenanceMode,
     'featured_message':   featuredMessage,
     'kori_greeting':      koriGreeting,
+    'auto_on':            autoOn,
   };
 
   PortfolioSettings copyWith({
@@ -38,12 +42,14 @@ class PortfolioSettings {
     bool?   maintenanceMode,
     String? featuredMessage,
     String? koriGreeting,
+    bool?   autoOn,
   }) => PortfolioSettings(
     availableForWork: availableForWork ?? this.availableForWork,
     contactOpen:      contactOpen      ?? this.contactOpen,
     maintenanceMode:  maintenanceMode  ?? this.maintenanceMode,
     featuredMessage:  featuredMessage  ?? this.featuredMessage,
     koriGreeting:     koriGreeting     ?? this.koriGreeting,
+    autoOn:           autoOn           ?? this.autoOn,
   );
 }
 

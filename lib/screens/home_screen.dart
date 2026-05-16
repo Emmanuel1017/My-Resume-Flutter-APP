@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
+import '../services/portfolio_service.dart';
 import 'portfolio_screen.dart';
 import 'profile_screen.dart';
 import 'dashboard_screen.dart';
@@ -16,6 +17,19 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   int _tab = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _triggerAutoOn();
+  }
+
+  Future<void> _triggerAutoOn() async {
+    final s = await PortfolioService().stream().first;
+    if (s.autoOn) {
+      await PortfolioService().toggle('available_for_work', true);
+    }
+  }
 
   // Keep all three pages alive so WebView doesn't reload on tab switch
   static const _pages = [

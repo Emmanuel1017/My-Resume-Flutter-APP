@@ -49,15 +49,34 @@ class _CreateAdminScreenState extends State<CreateAdminScreen> {
           .set({'admin_initialized': true, 'admin_uid': cred.user!.uid},
                SetOptions(merge: true));
 
-      // AuthGate will navigate to /home automatically via auth stream
+      // Navigate to login with credentials pre-filled; login screen will
+      // detect the existing session and proceed directly to /home.
+      if (mounted) {
+        Navigator.of(context).pushReplacementNamed('/login', arguments: {
+          'email':    _email.text.trim(),
+          'password': _password.text,
+        });
+      }
 
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        // Account already exists — go straight to login with email pre-filled
+        if (mounted) {
+          Navigator.of(context).pushReplacementNamed('/login', arguments: {
+            'email': _email.text.trim(),
+          });
+        }
+        return;
+      }
       setState(() {
         _error = switch (e.code) {
-          'email-already-in-use' => 'That email already has an account.',
-          'weak-password'        => 'Password must be at least 6 characters.',
-          'invalid-email'        => 'Please enter a valid email address.',
-          _                      => e.message ?? 'Could not create account.',
+          'weak-password'           => 'Password must be at least 6 characters.',
+          'invalid-email'           => 'Please enter a valid email address.',
+          'operation-not-allowed'   => 'Email/password sign-in is not enabled.\n'
+              'Go to Firebase Console → Authentication → Sign-in method and enable Email/Password.',
+          'configuration-not-found' => 'Firebase Auth is not configured.\n'
+              'Enable Email/Password in Firebase Console → Authentication → Sign-in method.',
+          _                         => '[${e.code}] ${e.message ?? 'Could not create account.'}',
         };
       });
     } finally {
