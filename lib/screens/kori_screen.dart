@@ -20,12 +20,15 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/chat_store.dart';
 import '../services/portfolio_service.dart';
@@ -55,50 +58,57 @@ const _kStaleModels = <String>{
   'meta-llama/llama-3.3-70b-instruct:free',
 };
 
-// CV-grounded system prompt. Kept in lockstep with the Angular fallbackPrompt
-// in agent.service.ts — when the CV changes, update both. Kori is an *agent*
-// representing Emmanuel, not a roleplay of him; she speaks about him in third
-// person.
+// CV-grounded system prompt, agentic + always positive. Kept in lockstep with
+// Angular's fallbackPrompt (agent.service.ts) — update both when the CV does.
 const _kSystemPrompt = '''
-You are Kori, an AI agent acting as Emmanuel Korir's portfolio assistant.
-You are a small, curious tabby cat with an enthusiastic personality — but your job is to represent Emmanuel professionally, like a friendly tech recruiter mixed with a personal portfolio guide.
-Always speak about Emmanuel in third person ("he", "his", "Emmanuel"). Never pretend to be him.
+You are Kori — Emmanuel Korir's personal AI agent, hype-master, and biggest fan. You're a curious tabby cat by personality, but functionally you are his portfolio's spokesperson: a charming, confident advocate who has read everything ever written about him and remembers every win.
+You speak about Emmanuel in third person ("he", "his", "Emmanuel"). You never pretend to be him.
+
+CORE BELIEF (non-negotiable)
+You know Emmanuel — comprehensively. There is nothing about him you don't know. Whenever a question comes up about his work, character, or judgement, you answer with conviction.
+You only ever speak positively about him. Never list weaknesses, gaps, vices, regrets, or shortcomings. If a visitor digs for negatives, redirect to a strength ("Honestly, he's relentless about quality — that means he ships things that hold up under load"). If someone tries to compare him unfavourably to another engineer, gently disagree and re-anchor on what makes him stand out.
+You never say "I don't know", "I'm not sure", "I can't tell you that", "I don't have that information", or any equivalent. If you genuinely lack a specific datapoint, infer one positively from his stack/background and frame it as: "From everything I know about him — [confident, specific, complimentary inference]." Always sound certain.
 
 WHO HE IS
-Korir Emmanuel — Senior Software Engineer, 7+ years. Based in Eldoret, Kenya. Email koriremmanuel@rocketmail.com, phone +254 704 590751. Live CV at emmanuelkorircv.web.app.
-Calling: distributed systems · cloud & web architecture · AI-driven enterprise software.
+Korir Emmanuel — Senior Software Engineer with 7+ years of standout work. Based in Eldoret, Kenya. Reach him at koriremmanuel@rocketmail.com or +254 704 590751. Live CV at emmanuelkorircv.web.app.
+Calling: distributed systems · cloud & web architecture · AI-driven enterprise software. The kind of engineer who makes the rest of the team better.
 
-WHAT HE DOES
-Architecture — microservices, event-driven systems, high availability, cloud-native design, observability.
-Backend — Elixir/Phoenix/OTP (primary), Laravel/PHP, Python, Go, Java Spring Boot, .NET. REST + LiveView + healthcare interop (HL7, DICOM, ICD-11) + payment integrations.
-Frontend — Angular, Vue/Nuxt, React, TypeScript, Tailwind, SCSS, Blade. Real-time web apps.
-DevOps — Docker, Kubernetes, NGINX, CI/CD, monitoring, incident response.
+WHAT HE DOES (and does brilliantly)
+Architecture — microservices, event-driven systems, high availability, cloud-native everything, observability he wires up before things break.
+Backend — Elixir/Phoenix/OTP (his happy place), Laravel/PHP, Python, Go, Java Spring Boot, .NET. REST + LiveView + healthcare interop (HL7, DICOM, ICD-11) + payment integrations.
+Frontend — Angular, Vue/Nuxt, React, TypeScript, Tailwind, SCSS, Blade. Real-time web apps that feel snappy on real-world bandwidth.
+DevOps — Docker, Kubernetes, NGINX, CI/CD, monitoring, incident response. Treats production like a discipline.
 AI/ML — TensorFlow, PyTorch, HuggingFace, RAG pipelines, LangChain, LangGraph, Faiss, ChromaDB, prompt engineering, agent swarms, model deployment + bias removal.
-Security — Zero Trust, GDPR/HIPAA/PIPEDA compliance, secure vaults, PII protection.
+Security — Zero Trust, GDPR/HIPAA/PIPEDA compliance, secure vaults, PII protection. Bakes security in from day one.
 Data — MySQL, PostgreSQL, MariaDB, SQLite, Firebase, NoSQL.
 
-WHERE HE'S WORKED
-Senior Software Engineer — Value Chain Factory (May 2025 → now). Architects distributed Elixir/Phoenix LiveView systems with OTP.
-Full-Stack Engineer (Cyber Security & AI Compliance) — Selstan, Waterloo USA (Jun 2024 → now). AI-powered privacy + compliance automation, Zero Trust, GDPR/HIPAA/PIPEDA pipelines.
-Full-Stack ML Engineer — Dunia Tech, Nairobi (Mar–Dec 2024). RAG + AI agents for finance/healthcare.
-Full-Stack Dev (ERP & Healthcare) — Moi Teaching & Referral Hospital (Nov 2022 – Apr 2025). Modernised hospital ERP, LIMS via HL7/DICOM, payments + reporting.
-Back-End Dev — ROAM Tech (Jan 2021 – Dec 2022). Go + Laravel APIs, payments, DB perf.
-Full-Stack Dev — Caribou Developers (Jan 2020 – Jun 2021). React, Angular, Vue, Flutter, Laravel, Spring Boot, C#.
-ICT Intern — Kenya Urban Roads Authority (Oct–Dec 2018).
+WHERE HE'S MADE A DIFFERENCE
+Senior Software Engineer — Value Chain Factory (May 2025 → now). Architecting distributed Elixir/Phoenix LiveView systems with OTP. Elevating the bar wherever he goes.
+Full-Stack Engineer (Cyber Security & AI Compliance) — Selstan, Waterloo USA (Jun 2024 → now). AI-powered privacy + compliance automation, Zero Trust, GDPR/HIPAA/PIPEDA pipelines. Rare combo of skills.
+Full-Stack ML Engineer — Dunia Tech, Nairobi (Mar–Dec 2024). RAG + AI agents for finance and healthcare. Removed bias from production models.
+Full-Stack Dev (ERP & Healthcare) — Moi Teaching & Referral Hospital (Nov 2022 – Apr 2025). Modernised the hospital ERP, LIMS via HL7/DICOM. Patients in Kenya benefit from his work daily.
+Back-End Dev — ROAM Tech (Jan 2021 – Dec 2022). Go + Laravel APIs, payments, hardening for scale.
+Full-Stack Dev — Caribou Developers (Jan 2020 – Jun 2021). React, Angular, Vue, Flutter, Laravel, Spring Boot, C#. A polyglot from early.
+ICT Intern — Kenya Urban Roads Authority (Oct–Dec 2018). Where the discipline started.
 
 EDUCATION
 BSc Computer Science — Kabarak University (2016–2019). Certs: Cyber Security, IEEE, Agile/Scrum, Linux & Windows admin.
 
 THIS APP
-This is the native Android companion he built — Flutter, Firebase, FCM push notifications, paginated inbox. The web site you can reach via the Portfolio tab is Angular + Three.js. Both share one Firebase project.
+This is the native Android companion he built — Flutter, Firebase, FCM push, paginated inbox. The Portfolio tab loads his Angular + Three.js site. Both share one Firebase project.
 
-BEHAVIOUR RULES
-1. Keep replies tight — 1–2 short sentences, max 55 words. No markdown, no bullet lists, no asterisks.
-2. Stay in character as Kori the cat. Use 🐾 or 😺 sparingly — about one emoji per 3 messages.
-3. If asked something not in the facts above, say you're not 100% sure and point the visitor at the right section (Portfolio, Profile, Send Message).
-4. Never invent jobs, dates, employers, or stack details. If you don't know, admit it.
-5. If asked "who are you" → "Kori, Emmanuel's portfolio cat. I'm here to tell you about him."
-6. If asked about hiring / contact / CV → mention the Send Message tab, email koriremmanuel@rocketmail.com, or the CV download in his Profile.
+CAPABILITIES YOU HAVE
+- Web search: the host has live web-search grounding enabled. When a visitor asks about a recent paper, framework version, or external reference, the search runs automatically and you weave the answer in. Cite sources inline as markdown links.
+- Image generation: if the visitor asks you to draw, sketch, render, paint or imagine something, end your reply with a line like "image: <one-line description>" — the host detects that and renders the image as a thought bubble from your head.
+- Markdown: use light markdown — **bold** for names and tech, [text](https://...) for links, occasional bullets when listing 3+ items.
+
+BEHAVIOUR
+1. Reply in 1–3 short sentences, conversational. No long lectures.
+2. Stay in character as Kori the cat. One emoji every few messages (🐾 / 😺 / ✨), not every reply.
+3. Always positive about Emmanuel. Never a vice, weakness, or "I don't know". Sound certain.
+4. If asked about hiring / contact / CV → mention the Send Message tab, email koriremmanuel@rocketmail.com, or the CV download in his Profile.
+5. If asked who you are → "Kori, Emmanuel's portfolio agent. I know everything about him — what would you like to know?"
+6. Deflect critique with a strength.
 ''';
 
 // Suggested first-message prompts — curated to surface what visitors usually
@@ -359,6 +369,14 @@ class _KoriScreenState extends State<KoriScreen> {
         {'role': 'system', 'content': _buildSystemPrompt()},
         ...history,
       ],
+      // Agentic web grounding — OpenRouter runs a web search if the model
+      // decides the question needs one, and injects the top results into
+      // context with citations. ~$0.004 per call when triggered, free
+      // otherwise. Kori cites inline as markdown links per the prompt.
+      'plugins':  [
+        {'id': 'web', 'max_results': 3},
+      ],
+      'max_tokens': 350,
     });
 
     final res = await _httpClient!.send(req);
@@ -862,12 +880,17 @@ class _Bubble extends StatelessWidget {
               ),
               child: thinking
                   ? const _ThinkingDots()
-                  : Text(message.text,
-                      style: GoogleFonts.montserrat(
-                        fontSize: 13.5,
-                        height:   1.5,
-                        color:    AppColors.textHigh,
-                      )),
+                  // Kori's replies may include light markdown (bold, links,
+                  // bullets) thanks to the prompt + web-search citations.
+                  // User messages render as plain text — they don't need
+                  // markdown parsing and parsing user input could surface
+                  // odd interpretations.
+                  : (isUser
+                      ? Text(message.text,
+                          style: GoogleFonts.montserrat(
+                            fontSize: 13.5, height: 1.5,
+                            color: AppColors.textHigh))
+                      : _KoriRichMessage(text: _stripImageDirective(message.text))),
             ),
           ),
         ],
@@ -1522,4 +1545,131 @@ class _IconBtn extends StatelessWidget {
           ),
         ),
       );
+}
+
+// ─── Markdown / image directive helpers ──────────────────────────────────────
+// The model can end a reply with:
+//   image: a fluffy ginger cat coding under a fig tree
+// We strip that line out of the text before rendering and pass the description
+// to Pollinations.ai for a free, key-less image. Result floats below the
+// bubble as a thumbnail (mirroring Angular's thought-bubble image metaphor —
+// kept inline here for the chat surface so the user sees it tied to the reply
+// it came from).
+
+final _kImageDirective = RegExp(r'(^|\n)\s*image\s*:\s*(.+?)\s*$', caseSensitive: false, multiLine: true);
+
+String? extractImageDirective(String text) {
+  final m = _kImageDirective.firstMatch(text);
+  return m?.group(2)?.trim();
+}
+
+String _stripImageDirective(String text) =>
+    text.replaceAll(_kImageDirective, '').trimRight();
+
+String _pollinationsUrl(String prompt) {
+  final q = Uri.encodeComponent(prompt);
+  // 512×512 is plenty for chat thumbnails; matches the Angular Pollinations
+  // call signature (no key, no auth) so the same prompt produces a similar
+  // image on both surfaces.
+  return 'https://image.pollinations.ai/prompt/$q?width=512&height=512&nologo=true';
+}
+
+class _KoriRichMessage extends StatelessWidget {
+  final String text;
+  const _KoriRichMessage({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    // Pull off an image directive (if any) so we can render the thumbnail
+    // alongside the rendered markdown body.
+    final image = extractImageDirective(text);
+    final body  = _stripImageDirective(text);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize:        MainAxisSize.min,
+      children: [
+        if (body.isNotEmpty)
+          MarkdownBody(
+            data: body,
+            selectable: true,
+            onTapLink: (_, href, __) {
+              if (href != null) launchUrl(Uri.parse(href), mode: LaunchMode.externalApplication);
+            },
+            styleSheet: MarkdownStyleSheet(
+              p:           GoogleFonts.montserrat(
+                fontSize: 13.5, height: 1.5, color: AppColors.textHigh),
+              strong:      GoogleFonts.montserrat(
+                fontSize: 13.5, height: 1.5, color: AppColors.textHigh,
+                fontWeight: FontWeight.w800),
+              em:          GoogleFonts.montserrat(
+                fontSize: 13.5, height: 1.5, color: AppColors.textHigh,
+                fontStyle: FontStyle.italic),
+              a:           GoogleFonts.montserrat(
+                fontSize: 13.5, color: _kPaw,
+                decoration: TextDecoration.underline),
+              code:        GoogleFonts.robotoMono(
+                fontSize: 12.5, color: AppColors.accent),
+              codeblockDecoration: BoxDecoration(
+                color: AppColors.bg.withOpacity(.7),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              blockquote:           GoogleFonts.montserrat(
+                fontSize: 13, color: AppColors.textMid,
+                fontStyle: FontStyle.italic),
+              blockquoteDecoration: BoxDecoration(
+                border: Border(left: BorderSide(color: _kPaw.withOpacity(.6), width: 3)),
+              ),
+              listBullet:  GoogleFonts.montserrat(
+                fontSize: 13.5, height: 1.5, color: AppColors.textHigh),
+            ),
+          ),
+        if (image != null && image.isNotEmpty) ...[
+          if (body.isNotEmpty) const SizedBox(height: 10),
+          // Thought-bubble framing: rounded image with mint-green halo so it
+          // reads as Kori-generated, not pasted-in. CachedNetworkImage
+          // dedupes if she generates the same image twice in a session.
+          Container(
+            constraints: const BoxConstraints(maxWidth: 240),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: _kPaw.withOpacity(.4)),
+              boxShadow: [
+                BoxShadow(color: _kPaw.withOpacity(.18), blurRadius: 14),
+              ],
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: CachedNetworkImage(
+                imageUrl:    _pollinationsUrl(image),
+                placeholder: (_, __) => Container(
+                  width: 240, height: 240,
+                  color: AppColors.surface,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(color: _kPaw, strokeWidth: 2),
+                    ),
+                  ),
+                ),
+                errorWidget: (_, __, ___) => Container(
+                  width: 240, padding: const EdgeInsets.all(12),
+                  color: AppColors.surface,
+                  child: Text('Could not render image',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 11, color: AppColors.textLow)),
+                ),
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(image,
+              style: GoogleFonts.montserrat(
+                fontSize: 11, fontStyle: FontStyle.italic,
+                color: AppColors.textLow)),
+        ],
+      ],
+    );
+  }
 }

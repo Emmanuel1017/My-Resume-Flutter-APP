@@ -23,6 +23,9 @@ dependencies:
   http: ^1.2.0
   shared_preferences: ^2.3.0
   fl_chart: ^0.69.0
+  # Markdown rendering for Kori's agent replies. Light usage - bold, links,
+  # bullets - so the package's basic feature set is plenty.
+  flutter_markdown: ^0.7.4
 
 dev_dependencies:
   flutter_test:
