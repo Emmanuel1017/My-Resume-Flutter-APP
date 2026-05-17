@@ -5,9 +5,10 @@
 The Android companion for [my portfolio site](https://emmanuel1017.github.io/Angular-Resume/).
 
 [![Android APK](https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk)
-[![Windows](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin-windows-x64.zip)
-[![Linux](https://img.shields.io/badge/Linux-x64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin-linux-x64.tar.gz)
-[![iOS](https://img.shields.io/badge/iOS-build%20locally-000000?style=for-the-badge&logo=apple&logoColor=white)](#deploy)
+[![iOS](https://img.shields.io/badge/iOS-unsigned%20.app-000000?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest)
+[![Windows / Linux](https://img.shields.io/badge/Windows%20%2F%20Linux-PWA-A8E87A?style=for-the-badge&logo=googlechrome&logoColor=white)](https://emmanuel1017.github.io/Angular-Resume/)
+[![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![Firebase](https://img.shields.io/badge/Firebase-FCM%20%C2%B7%20Firestore%20%C2%B7%20Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
 [![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
 [![Firebase](https://img.shields.io/badge/Firebase-FCM%20%C2%B7%20Firestore%20%C2%B7%20Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
 
@@ -290,7 +291,16 @@ ios/ - windows/ - linux/            Platform scaffolds; Firebase config still ne
 
 ---
 
-## Running it
+## Install
+
+| Platform | How | Notes |
+| --- | --- | --- |
+| **Android** | Download the [latest APK](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk) and side-load (`adb install -r portfolio-admin.apk`). | The native, full-featured build. FCM push + Firestore + Kori cat all live. |
+| **iOS** | Download the [unsigned `.app` zip](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest) and re-sign with your own Apple Developer cert. Or clone, drop `GoogleService-Info.plist` into `ios/Runner/`, open in Xcode, set your signing team, then `flutter build ipa --release`. | Apple won't let unsigned IPAs install over Safari, so the release just ships the `.app` for re-signing. |
+| **Windows** | Install the [portfolio site as a PWA](https://emmanuel1017.github.io/Angular-Resume/) from Edge or Chrome ("Install Korir Portfolio"). | Flutter's official Firebase desktop plugins don't ship Release-mode Windows libraries yet, so a native Windows build is blocked upstream. The PWA install is genuinely first-class: standalone window, app-list entry, themed window chrome. |
+| **Linux** | Same as Windows &mdash; install as a PWA from Chrome/Firefox. Or `flutter build linux --release` if you've already stripped out the Firebase plugins for your fork. | Same upstream gap. The PWA path is the recommended one until Firebase Linux desktop ships. |
+
+## Running from source
 
 ```bash
 flutter pub get
@@ -317,7 +327,22 @@ Privacy posture: IPs land in Firestore and stay there. Rules let anyone create a
 
 ## Deploy
 
-One command from the repo root builds an Android APK + a Windows zip (on Windows hosts) or Linux tarball (on Linux hosts), then uploads everything to a new GitHub Release on `Emmanuel1017/My-Resume-Flutter-APP`:
+Two release paths, complementary:
+
+### A. GitHub Actions (recommended for clean cross-platform)
+
+Tag a release and the [`release-multiplatform.yml`](.github/workflows/release-multiplatform.yml) workflow takes over:
+
+```bash
+git tag v1.2.0
+git push origin v1.2.0
+```
+
+That fires three parallel build jobs: **Android** on `ubuntu-latest`, **iOS** on `macos-latest` (unsigned `.app` zip), **Linux** on `ubuntu-latest` (skips gracefully if Firebase Linux libs aren't ready). When they're done a fourth job attaches the artifacts to the matching GitHub Release (creating it if needed). Re-running on the same tag clobbers existing assets, so it's safe to retry.
+
+You can also fire it manually from the Actions tab via `workflow_dispatch` with an optional `tag` input.
+
+### B. Local one-shot (Android-first)
 
 ```bash
 export GITHUB_TOKEN=ghp_...      # PAT with `repo` scope
@@ -333,7 +358,7 @@ Flags:
 --notes "..."      release body
 ```
 
-The script also handles the asset-already-exists 422 by deleting and re-uploading.
+Builds Android always, plus Windows zip (on Windows hosts) or Linux tarball (on Linux hosts), then uploads. Handles the 422-already-exists case by deleting and re-uploading.
 
 ### Per-platform
 
