@@ -11,6 +11,15 @@ final _styleDate    = GoogleFonts.montserrat(fontSize: 10.5, color: AppColors.te
 final _stylePreview = GoogleFonts.montserrat(fontSize: 12,   color: AppColors.textMid, height: 1.45);
 final _styleFull    = GoogleFonts.montserrat(fontSize: 12.5, color: AppColors.textHigh, height: 1.6);
 
+// ── Firestore query ───────────────────────────────────────────────────────────
+// Angular saves `date` (string) but no `timestamp`. New Angular submissions now
+// include `timestamp: serverTimestamp()`. We sort by timestamp descending so
+// new messages float to the top; docs without the field sort last (nulls last).
+final _contactsQuery = FirebaseFirestore.instance
+    .collection('contacts')
+    .orderBy('timestamp', descending: true)
+    .limit(100);
+
 class MessagesScreen extends StatefulWidget {
   const MessagesScreen({super.key});
 
@@ -19,11 +28,15 @@ class MessagesScreen extends StatefulWidget {
 }
 
 class _MessagesScreenState extends State<MessagesScreen> {
+  // Track which card index is expanded (-1 = none)
   int _expanded = -1;
 
-  // Batch-mark all unread docs as read
+  // Batch-mark all unread docs as read in a single Firestore write
   Future<void> _markAllRead(List<QueryDocumentSnapshot> docs) async {
-    final unread = docs.where((d) => !(d.data() as Map)['read'] as bool? ?? false).toList();
+    final unread = docs.where((d) {
+      final data = d.data() as Map<String, dynamic>;
+      return !(data['read'] as bool? ?? false);
+    }).toList();
     if (unread.isEmpty) return;
     HapticFeedback.lightImpact();
     final batch = FirebaseFirestore.instance.batch();
@@ -37,16 +50,17 @@ class _MessagesScreenState extends State<MessagesScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
+      // StreamBuilder gives real-time updates: any new web/app submission
+      // triggers a Firestore snapshot → UI rebuilds automatically.
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('contacts')
-            .orderBy('timestamp', descending: true)
-            .limit(50)
-            .snapshots(),
+        stream: _contactsQuery.snapshots(),
         builder: (context, snap) {
+          // While connecting show spinner in the list area (not full screen)
+          final loading = snap.connectionState == ConnectionState.waiting && !snap.hasData;
           final docs    = snap.data?.docs ?? [];
-          final unread  = docs.where((d) => !(d.data() as Map)['read'] as bool? ?? false).length;
-          final loading = snap.connectionState == ConnectionState.waiting;
+          final unread  = docs.where((d) {
+            return !(((d.data() as Map<String, dynamic>)['read']) as bool? ?? false);
+          }).length;
 
           return CustomScrollView(
             physics: const BouncingScrollPhysics(),
@@ -66,13 +80,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   if (unread > 0) ...[
                     const SizedBox(width: 8),
                     Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 3),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color:        AppColors.accent.withOpacity(.14),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                            color: AppColors.accent.withOpacity(.3)),
+                        border:       Border.all(color: AppColors.accent.withOpacity(.3)),
                       ),
                       child: Text('$unread new',
                           style: GoogleFonts.montserrat(
@@ -87,12 +99,11 @@ class _MessagesScreenState extends State<MessagesScreen> {
                       onTap: () => _markAllRead(docs),
                       child: Container(
                         margin: const EdgeInsets.only(right: 16),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 6),
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                         decoration: BoxDecoration(
                           color:        AppColors.surface.withOpacity(.7),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: AppColors.border),
+                          border:       Border.all(color: AppColors.border),
                         ),
                         child: Text('Mark all read',
                             style: GoogleFonts.montserrat(
@@ -107,8 +118,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
               if (loading)
                 const SliverFillRemaining(
                   child: Center(
-                    child: CircularProgressIndicator(
-                        color: AppColors.accent, strokeWidth: 2),
+                    child: CircularProgressIndicator(color: AppColors.accent, strokeWidth: 2),
                   ),
                 )
 
@@ -116,15 +126,22 @@ class _MessagesScreenState extends State<MessagesScreen> {
               else if (snap.hasError)
                 SliverFillRemaining(
                   child: Center(
-                    child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      const Icon(Icons.wifi_off_rounded,
-                          color: AppColors.danger, size: 36),
-                      const SizedBox(height: 12),
-                      Text('Could not load messages',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 13, color: AppColors.danger,
-                            fontWeight: FontWeight.w600)),
-                    ]),
+                    child: Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Column(mainAxisSize: MainAxisSize.min, children: [
+                        const Icon(Icons.wifi_off_rounded, color: AppColors.danger, size: 36),
+                        const SizedBox(height: 12),
+                        Text('Could not load messages',
+                            style: GoogleFonts.montserrat(
+                              fontSize: 13, color: AppColors.danger,
+                              fontWeight: FontWeight.w600)),
+                        const SizedBox(height: 6),
+                        Text('${snap.error}',
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.montserrat(
+                              fontSize: 11, color: AppColors.textLow)),
+                      ]),
+                    ),
                   ),
                 )
 
@@ -133,8 +150,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                 SliverFillRemaining(
                   child: Center(
                     child: Column(mainAxisSize: MainAxisSize.min, children: [
-                      Icon(Icons.inbox_outlined,
-                          color: AppColors.textLow, size: 52),
+                      Icon(Icons.inbox_outlined, color: AppColors.textLow, size: 52),
                       const SizedBox(height: 14),
                       Text('No messages yet',
                           style: GoogleFonts.montserrat(
@@ -142,7 +158,7 @@ class _MessagesScreenState extends State<MessagesScreen> {
                             fontWeight: FontWeight.w700)),
                       const SizedBox(height: 6),
                       Text(
-                        'Messages sent via your portfolio will appear here',
+                        'Messages from your portfolio contact form will appear here',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.montserrat(
                           fontSize: 12, color: AppColors.textLow),
@@ -151,7 +167,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   ),
                 )
 
-              // ── List (SliverList.builder is lazy — only visible cards built) ──
+              // ── Message list ───────────────────────────────────────────────
+              // SliverList.builder is lazy: only visible cards are built.
+              // New Firestore snapshots insert the new card at index 0 and
+              // animate it in via the AnimatedContainer inside _MessageCard.
               else
                 SliverPadding(
                   padding: const EdgeInsets.fromLTRB(16, 8, 16, 40),
@@ -165,9 +184,10 @@ class _MessagesScreenState extends State<MessagesScreen> {
                         doc:      doc,
                         data:     data,
                         expanded: _expanded == i,
-                        onTap:    () {
+                        onTap: () {
                           HapticFeedback.selectionClick();
                           setState(() => _expanded = _expanded == i ? -1 : i);
+                          // Auto-mark as read when expanded
                           if (!(data['read'] as bool? ?? false)) {
                             doc.reference.update({'read': true});
                           }
@@ -212,7 +232,17 @@ class _MessageCard extends StatelessWidget {
     return _avatarColors[name.codeUnitAt(0) % _avatarColors.length];
   }
 
-  String _formatDate(DateTime dt) {
+  // Handles both new docs (Firestore Timestamp) and legacy docs (date string)
+  String _resolveDate() {
+    final ts      = data['timestamp'] as Timestamp?;
+    final dateStr = data['date']      as String?;
+
+    if (ts != null) return _formatDateTime(ts.toDate());
+    if (dateStr != null && dateStr.isNotEmpty) return dateStr; // legacy string as-is
+    return '—';
+  }
+
+  String _formatDateTime(DateTime dt) {
     final diff = DateTime.now().difference(dt);
     if (diff.inSeconds < 60)  return 'just now';
     if (diff.inMinutes < 60)  return '${diff.inMinutes}m ago';
@@ -223,13 +253,12 @@ class _MessageCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name    = data['name']      as String?    ?? 'Anonymous';
-    final email   = data['email']     as String?    ?? '';
-    final message = data['message']   as String?    ?? '';
-    final source  = data['source']    as String?    ?? '';
-    final read    = data['read']      as bool?      ?? false;
-    final ts      = data['timestamp'] as Timestamp?;
-    final date    = ts != null ? _formatDate(ts.toDate()) : '—';
+    final name    = data['name']    as String? ?? 'Anonymous';
+    final email   = data['email']   as String? ?? '';
+    final message = data['message'] as String? ?? '';
+    final source  = data['source']  as String? ?? '';
+    final read    = data['read']    as bool?   ?? false;
+    final date    = _resolveDate();
     final accent  = _avatarColor(name);
 
     return GestureDetector(
@@ -259,7 +288,7 @@ class _MessageCard extends StatelessWidget {
 
             // ── Header row ────────────────────────────────────────────────
             Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              // Sender avatar (initials, color-coded per first letter)
+              // Initials avatar, color-coded by first letter
               Container(
                 width: 40, height: 40,
                 decoration: BoxDecoration(
@@ -271,8 +300,7 @@ class _MessageCard extends StatelessWidget {
                 child: Text(
                   name.isNotEmpty ? name[0].toUpperCase() : '?',
                   style: GoogleFonts.montserrat(
-                    fontSize: 15, fontWeight: FontWeight.w800,
-                    color: accent),
+                    fontSize: 15, fontWeight: FontWeight.w800, color: accent),
                 ),
               ),
               const SizedBox(width: 12),
@@ -280,8 +308,8 @@ class _MessageCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Name + unread dot + timestamp
                     Row(children: [
+                      // Unread blue dot
                       if (!read)
                         Container(
                           width: 7, height: 7,
@@ -294,27 +322,24 @@ class _MessageCard extends StatelessWidget {
                       Expanded(
                         child: Text(name,
                             style: _styleName.copyWith(
-                              fontWeight: read
-                                  ? FontWeight.w600
-                                  : FontWeight.w800),
+                              fontWeight: read ? FontWeight.w600 : FontWeight.w800),
                             overflow: TextOverflow.ellipsis),
                       ),
                       const SizedBox(width: 8),
                       Text(date, style: _styleDate),
                     ]),
                     const SizedBox(height: 3),
-                    // Email + source badge + chevron
                     Row(children: [
                       Expanded(
                         child: Text(email,
                             style: _styleEmail,
                             overflow: TextOverflow.ellipsis),
                       ),
+                      // Source badge: 'web' for Angular, 'app' for Flutter guest
                       if (source.isNotEmpty) ...[
                         const SizedBox(width: 6),
                         Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color:        AppColors.primary.withOpacity(.12),
                             borderRadius: BorderRadius.circular(8),
@@ -339,7 +364,7 @@ class _MessageCard extends StatelessWidget {
               ),
             ]),
 
-            // ── Message body (preview / full) ─────────────────────────────
+            // ── Message preview / full ────────────────────────────────────
             AnimatedCrossFade(
               duration:       const Duration(milliseconds: 260),
               firstCurve:     Curves.easeInCubic,
@@ -350,12 +375,10 @@ class _MessageCard extends StatelessWidget {
               firstChild: Padding(
                 padding: const EdgeInsets.only(top: 8, left: 52),
                 child: Text(
-                  message.length > 90
-                      ? '${message.substring(0, 90)}…'
-                      : message,
-                  maxLines:  2,
-                  overflow:  TextOverflow.ellipsis,
-                  style:     _stylePreview),
+                  message.length > 90 ? '${message.substring(0, 90)}…' : message,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style:    _stylePreview),
               ),
               secondChild: Padding(
                 padding: const EdgeInsets.only(top: 10, left: 52),
@@ -375,10 +398,9 @@ class _MessageCard extends StatelessWidget {
                           SnackBar(
                             content: Text('Copied: $email',
                                 style: GoogleFonts.montserrat(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600)),
+                                  fontSize: 12, fontWeight: FontWeight.w600)),
                             backgroundColor: AppColors.primary,
-                            behavior: SnackBarBehavior.floating,
+                            behavior:        SnackBarBehavior.floating,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14)),
                             margin:   const EdgeInsets.all(16),
@@ -424,8 +446,7 @@ class _ActionBtn extends StatelessWidget {
         const SizedBox(width: 6),
         Text(label,
             style: GoogleFonts.montserrat(
-              fontSize: 11.5, color: color,
-              fontWeight: FontWeight.w700)),
+              fontSize: 11.5, color: color, fontWeight: FontWeight.w700)),
       ]),
     ),
   );
