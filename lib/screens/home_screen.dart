@@ -1,11 +1,14 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/portfolio_service.dart';
+import '../widgets/marquee_label.dart';
 import 'portfolio_screen.dart';
 import 'profile_screen.dart';
 import 'dashboard_screen.dart';
+import 'messages_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,9 +17,16 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen>
-    with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
+
+  // Unread count lives at this level so only the bottom nav badge rebuilds —
+  // the tab body widgets are completely unaffected.
+  late final Stream<int> _unreadStream = FirebaseFirestore.instance
+      .collection('contacts')
+      .where('read', isEqualTo: false)
+      .snapshots()
+      .map((s) => s.docs.length);
 
   @override
   void initState() {
@@ -26,19 +36,11 @@ class _HomeScreenState extends State<HomeScreen>
 
   Future<void> _triggerAutoOn() async {
     final s = await PortfolioService().stream().first;
-    if (s.autoOn) {
-      await PortfolioService().toggle('available_for_work', true);
-    }
+    if (s.autoOn) await PortfolioService().toggle('available_for_work', true);
   }
 
-  // Keep all three pages alive so WebView doesn't reload on tab switch
-  static const _pages = [
-    PortfolioScreen(),
-    ProfileScreen(),
-    DashboardScreen(),
-  ];
-
   void _select(int i) {
+    if (_tab == i) return; // guard: no setState if already on this tab
     HapticFeedback.selectionClick();
     setState(() => _tab = i);
   }
@@ -47,32 +49,62 @@ class _HomeScreenState extends State<HomeScreen>
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      // IndexedStack keeps all pages mounted but only shows the active one
-      body: IndexedStack(index: _tab, children: _pages),
-      bottomNavigationBar: _NavBar(selected: _tab, onSelect: _select),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // ── WebView: Offstage keeps it mounted (no reload) but removes it
+          //    from the paint tree completely when not visible → 0 GPU cost.
+          Offstage(offstage: _tab != 0, child: const PortfolioScreen()),
+
+          // ── All other tabs are destroyed on leave, rebuilt on re-entry.
+          //    Firestore streams re-attach in <50 ms — far cheaper than keeping
+          //    Profile + Dashboard + Messages all alive simultaneously.
+          if (_tab == 1) const ProfileScreen(),
+          if (_tab == 2) const DashboardScreen(),
+          if (_tab == 3) const MessagesScreen(),
+        ],
+      ),
+      // RepaintBoundary isolates the nav bar so unread-count updates never
+      // trigger repaints elsewhere on screen.
+      bottomNavigationBar: RepaintBoundary(
+        child: StreamBuilder<int>(
+          stream: _unreadStream,
+          builder: (_, snap) => _NavBar(
+            selected:    _tab,
+            onSelect:    _select,
+            unreadCount: snap.data ?? 0,
+          ),
+        ),
+      ),
     );
   }
 }
 
-// ─── Custom bottom nav ───────────────────────────────────────────────────────
+// ─── Custom bottom nav ────────────────────────────────────────────────────────
 
 class _NavBar extends StatelessWidget {
-  final int selected;
+  final int               selected;
   final ValueChanged<int> onSelect;
-  const _NavBar({required this.selected, required this.onSelect});
+  final int               unreadCount;
+  const _NavBar({
+    required this.selected,
+    required this.onSelect,
+    required this.unreadCount,
+  });
 
   static const _items = [
-    _NavItem(icon: Icons.language_rounded,          label: 'Portfolio'),
-    _NavItem(icon: Icons.person_rounded,            label: 'Profile'),
+    _NavItem(icon: Icons.language_rounded,             label: 'Portfolio'),
+    _NavItem(icon: Icons.person_rounded,               label: 'Profile'),
     _NavItem(icon: Icons.admin_panel_settings_rounded, label: 'Admin'),
+    _NavItem(icon: Icons.inbox_rounded,                label: 'Messages'),
   ];
 
   @override
   Widget build(BuildContext context) {
-    final bottom = MediaQuery.of(context).padding.bottom;
+    final bottom = MediaQuery.paddingOf(context).bottom; // sizeOf avoids full MediaQuery rebuild
     return Container(
       decoration: const BoxDecoration(
-        color: AppColors.surface,
+        color:  AppColors.surface,
         border: Border(top: BorderSide(color: AppColors.border, width: .8)),
       ),
       child: SafeArea(
@@ -81,9 +113,11 @@ class _NavBar extends StatelessWidget {
           height: 56 + bottom,
           child: Row(
             children: List.generate(_items.length, (i) {
-              final item    = _items[i];
-              final active  = i == selected;
-              final color   = active ? AppColors.accent : AppColors.textLow;
+              final item   = _items[i];
+              final active = i == selected;
+              final color  = active ? AppColors.accent : AppColors.textLow;
+              final badge  = (i == 3 && unreadCount > 0 && !active)
+                  ? unreadCount : 0;
 
               return Expanded(
                 child: GestureDetector(
@@ -93,10 +127,10 @@ class _NavBar extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       AnimatedContainer(
-                        duration: const Duration(milliseconds: 250),
+                        duration: const Duration(milliseconds: 240),
                         curve:    Curves.easeOutCubic,
                         padding:  EdgeInsets.symmetric(
-                          horizontal: active ? 18 : 0,
+                          horizontal: active ? 10 : 0,
                           vertical:   4,
                         ),
                         decoration: BoxDecoration(
@@ -108,15 +142,45 @@ class _NavBar extends StatelessWidget {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(item.icon, color: color, size: 22),
+                            badge > 0
+                                ? Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      Icon(item.icon, color: color, size: 22),
+                                      Positioned(
+                                        top: -4, right: -6,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 4, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: AppColors.accent,
+                                            borderRadius: BorderRadius.circular(8),
+                                          ),
+                                          child: Text(
+                                            badge > 99 ? '99+' : '$badge',
+                                            style: const TextStyle(
+                                              fontSize: 8,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.black),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                : Icon(item.icon, color: color, size: 22),
+
                             if (active) ...[
-                              const SizedBox(width: 6),
-                              Text(
-                                item.label,
-                                style: GoogleFonts.montserrat(
-                                  fontSize:   12,
-                                  fontWeight: FontWeight.w700,
-                                  color:      color,
+                              const SizedBox(width: 5),
+                              // Flexible + _MarqueeLabel: text gets all remaining
+                              // space in the row; marquee activates only when the
+                              // label is genuinely wider than that space.
+                              Flexible(
+                                child: MarqueeLabel(
+                                  text:  item.label,
+                                  style: GoogleFonts.montserrat(
+                                    fontSize:   12,
+                                    fontWeight: FontWeight.w700,
+                                    color:      color),
                                 ),
                               ),
                             ],

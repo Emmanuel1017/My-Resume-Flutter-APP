@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/portfolio_service.dart';
 import '../theme/app_theme.dart';
+import '../widgets/marquee_label.dart';
 import 'portfolio_screen.dart';
 import 'profile_screen.dart';
 import 'guest_contact_screen.dart';
@@ -28,14 +29,8 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
     if (s.autoOn) await PortfolioService().toggle('available_for_work', true);
   }
 
-  // IndexedStack keeps all pages mounted — WebView won't reload on tab switch
-  static const _pages = [
-    PortfolioScreen(),
-    ProfileScreen(),
-    GuestContactScreen(),
-  ];
-
   void _select(int i) {
+    if (_tab == i) return;
     HapticFeedback.selectionClick();
     setState(() => _tab = i);
   }
@@ -44,7 +39,15 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bg,
-      body: IndexedStack(index: _tab, children: _pages),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // WebView stays mounted via Offstage — no reload on tab switch
+          Offstage(offstage: _tab != 0, child: const PortfolioScreen()),
+          if (_tab == 1) const ProfileScreen(),
+          if (_tab == 2) const GuestContactScreen(),
+        ],
+      ),
       bottomNavigationBar: _GuestNavBar(selected: _tab, onSelect: _select),
     );
   }
@@ -106,13 +109,16 @@ class _GuestNavBar extends StatelessWidget {
                           children: [
                             Icon(item.icon, color: color, size: 22),
                             if (active) ...[
-                              const SizedBox(width: 6),
-                              Text(item.label,
+                              const SizedBox(width: 5),
+                              Flexible(
+                                child: MarqueeLabel(
+                                  text:  item.label,
                                   style: GoogleFonts.montserrat(
                                     fontSize:   12,
                                     fontWeight: FontWeight.w700,
-                                    color:      color,
-                                  )),
+                                    color:      color),
+                                ),
+                              ),
                             ],
                           ],
                         ),

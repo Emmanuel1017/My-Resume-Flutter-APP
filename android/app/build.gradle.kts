@@ -24,11 +24,30 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Only ship ARM binaries — drops ~30 % APK size and avoids x86
+        // code paths that don't benefit from Vulkan/Impeller optimisations.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     buildTypes {
         release {
             signingConfig = signingConfigs.getByName("debug")
+
+            // R8 full mode: whole-program optimisation, inlining, and dead-code
+            // elimination across all classes including Flutter/Firebase deps.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+        debug {
+            // Keep debug fast — no shrinking or obfuscation.
+            isMinifyEnabled = false
         }
     }
 }

@@ -27,6 +27,14 @@
             <meta-data
                 android:name="android.allow_multiple_resumed_activities"
                 android:value="true"/>
+
+            <!-- Impeller: Flutter's Vulkan-backed rendering engine.
+                 Pre-compiles all shaders at startup → zero JIT shader jank during
+                 scrolling and animations. Falls back to OpenGL ES 3.0 on devices
+                 that lack Vulkan 1.0 support (Android < 9 or certain low-end SOCs). -->
+            <meta-data
+                android:name="io.flutter.embedding.android.EnableImpeller"
+                android:value="true"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
