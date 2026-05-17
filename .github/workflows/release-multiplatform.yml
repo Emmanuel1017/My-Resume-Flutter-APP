@@ -1,147 +1,118 @@
-# Multi-platform release pipeline.
-#
-# Runs on:
-#   - Manual dispatch from the Actions tab (workflow_dispatch).
-#   - Push of a tag matching v* (e.g. v1.1.0, v1.2.0-rc1).
-#
-# What it builds:
-#   - Android APK on ubuntu-latest (no signing — debug-signed for now).
-#   - iOS IPA on macos-latest (unsigned ad-hoc; user signs separately for App Store).
-#   - Linux x64 tarball on ubuntu-latest (.tar.gz of the bundle).
-#
-# Windows desktop is NOT built here because Flutter's official Firebase plugins
-# (cloud_firestore, firebase_messaging) don't ship Release-mode libraries for
-# Windows desktop yet (firebase_cpp_sdk_windows packaging gap). Until upstream
-# adds them, the Windows install path is the PWA from the portfolio site.
-#
-# All artifacts are uploaded to the GitHub Release that matches the trigger
-# tag (created if it doesn't exist).
+name: Release multi-platform
 
-name: Release (multi-platform)
-
-# `on` is a YAML 1.1 boolean alias for `true`. Quoting it as a string keeps
-# GitHub Actions from silently dropping the entire trigger block, which is
-# what happened on the first push of this file - the workflow registered but
-# never had a working `workflow_dispatch` or `push` trigger attached.
 "on":
   push:
-    tags: ['v*']
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Tag to release (e.g. v1.1.0). If empty, uses commit SHA.'
+        description: 'Tag to release (e.g. v1.1.0). If empty uses commit SHA.'
         required: false
 
 permissions:
   contents: write
 
 env:
-  FLUTTER_VERSION: '3.24.x'
+  FLUTTER_VERSION: '3.24.5'
 
 jobs:
-  # ── Android ────────────────────────────────────────────────────────────────
   android:
+    name: Android APK
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
-        with: { distribution: 'temurin', java-version: '17' }
+        with:
+          distribution: temurin
+          java-version: '17'
       - uses: subosito/flutter-action@v2
-        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: 'stable', cache: true }
-
-      - name: Prepare google-services.json
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Placeholder google-services.json
         run: |
-          # CI doesn't have a real google-services.json. Copy in a placeholder
-          # so flutter pub get + build doesn't choke. Replace this step with a
-          # secrets-based decode if you ever switch to signed CI builds.
           if [ ! -f android/app/google-services.json ]; then
             echo '{}' > android/app/google-services.json
           fi
-
       - run: flutter pub get
       - run: flutter build apk --release
-
       - uses: actions/upload-artifact@v4
         with:
           name: portfolio-admin-android
           path: build/app/outputs/flutter-apk/app-release.apk
 
-  # ── iOS ────────────────────────────────────────────────────────────────────
   ios:
+    name: iOS unsigned .app
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: 'stable', cache: true }
-
-      - name: Prepare GoogleService-Info.plist placeholder
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+      - name: Placeholder GoogleService-Info.plist
         run: |
           if [ ! -f ios/Runner/GoogleService-Info.plist ]; then
             touch ios/Runner/GoogleService-Info.plist
           fi
-
       - run: flutter pub get
       - run: flutter precache --ios
-      - name: Build IPA (no signing)
-        run: |
-          flutter build ios --release --no-codesign
-
-      - name: Bundle .app into a zip
+      - name: Build iOS without code signing
+        run: flutter build ios --release --no-codesign
+      - name: Zip the .app bundle
         run: |
           cd build/ios/iphoneos
           zip -r ../../../portfolio-admin-ios-unsigned.zip Runner.app
-
       - uses: actions/upload-artifact@v4
         with:
           name: portfolio-admin-ios
           path: portfolio-admin-ios-unsigned.zip
 
-  # ── Linux ──────────────────────────────────────────────────────────────────
   linux:
+    name: Linux x64 (best effort)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
-        with: { flutter-version: ${{ env.FLUTTER_VERSION }}, channel: 'stable', cache: true }
-
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
       - name: Install Linux desktop deps
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build libgtk-3-dev libsecret-1-dev libjsoncpp-dev
-
       - run: flutter config --enable-linux-desktop
       - run: flutter pub get
-      # Linux desktop build will also currently choke on firebase_firestore
-      # (same upstream packaging issue as Windows). The step is left here so
-      # it runs the moment upstream ships Linux libs - until then it'll fail
-      # and the release will just publish Android + iOS.
-      - name: Build Linux bundle (may skip if Firebase not supported)
+      - name: Build Linux bundle (may fail on Firebase Linux gap)
         continue-on-error: true
         run: flutter build linux --release
-
-      - name: Package Linux bundle (if built)
+      - name: Package bundle if built
         continue-on-error: true
         run: |
           if [ -d build/linux/x64/release/bundle ]; then
-            cd build/linux/x64/release && tar czf ../../../../portfolio-admin-linux-x64.tar.gz bundle
+            cd build/linux/x64/release
+            tar czf "$GITHUB_WORKSPACE/portfolio-admin-linux-x64.tar.gz" bundle
           fi
-
       - uses: actions/upload-artifact@v4
         if: hashFiles('portfolio-admin-linux-x64.tar.gz') != ''
         with:
           name: portfolio-admin-linux
           path: portfolio-admin-linux-x64.tar.gz
 
-  # ── Attach artifacts to the GitHub Release ────────────────────────────────
   release:
+    name: Attach to GitHub Release
     needs: [android, ios, linux]
+    if: always() && (needs.android.result == 'success' || needs.ios.result == 'success' || needs.linux.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Resolve release tag
+      - name: Resolve tag
         id: tag
         run: |
           if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
@@ -151,21 +122,16 @@ jobs:
           else
             echo "tag=v0.0.0-${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Upload artifacts to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.tag.outputs.tag }}"
           REPO="${GITHUB_REPOSITORY}"
-
-          # Ensure release exists
           gh release view "$TAG" -R "$REPO" >/dev/null 2>&1 || \
             gh release create "$TAG" -R "$REPO" \
               --title "Release $TAG" \
-              --notes "Multi-platform build. Android APK, iOS unsigned IPA, Linux x64 (when supported)."
-
-          # Rename + upload with --clobber so re-runs replace
+              --notes "Multi-platform build. Android APK, iOS unsigned .app, Linux x64 when supported."
           if [ -f artifacts/portfolio-admin-android/app-release.apk ]; then
             cp artifacts/portfolio-admin-android/app-release.apk portfolio-admin.apk
             gh release upload "$TAG" portfolio-admin.apk -R "$REPO" --clobber
