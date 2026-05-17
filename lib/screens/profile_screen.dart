@@ -46,6 +46,10 @@ const _socials = [
   _Social('GitHub',    Icons.code_rounded,           'https://github.com/Emmanuel1017'),
   _Social('LinkedIn',  Icons.work_rounded,           'https://linkedin.com/in/korir-emmanuel'),
   _Social('Email',     Icons.mail_rounded,           'mailto:koriremmanuel@rocketmail.com'),
+  // Served from the Angular-Resume repo's GitHub Release tag `cv-latest`.
+  // Updates are pushed via the cv-release workflow in that repo.
+  _Social('CV',        Icons.picture_as_pdf_rounded,
+      'https://github.com/Emmanuel1017/Angular-Resume/releases/download/cv-latest/cv.pdf'),
 ];
 
 const _certs = ['🔐 Cyber Security', '📡 IEEE', '⚙️ Agile / Scrum', '🐧 Linux Admin'];

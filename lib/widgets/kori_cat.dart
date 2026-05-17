@@ -104,15 +104,36 @@ class _KoriCatState extends State<KoriCat> with TickerProviderStateMixin {
           child: AnimatedBuilder(
             // Combine the three controllers — one rebuild per frame for all three.
             animation: Listenable.merge([_master, _blink, _boop]),
-            builder: (_, __) => CustomPaint(
-              painter: _KoriPainter(
-                t:          _master.value,
-                blink:      _blink.value,
-                boop:       _boop.value,
-                pointer:    widget.pointer,
-                expression: widget.expression,
-              ),
-            ),
+            builder: (_, __) {
+              // Pseudo-3D head turn: gentle yaw/pitch driven by the master
+              // sine plus a stronger boop component. Wrapping the painter in
+              // a Matrix4 perspective transform reads as a 3D headshot
+              // without the cost of a real WebGL/Impeller 3D rig — exactly
+              // the trade-off the rest of the app is built around.
+              final yaw   = math.sin(_master.value * math.pi * 2 * 0.6) * 0.10
+                          + (widget.pointer?.dx ?? 0) * 0.18;
+              final pitch = math.sin(_master.value * math.pi * 2 * 0.4 + 1.2) * 0.05
+                          + (widget.pointer?.dy ?? 0) * 0.10
+                          - _boop.value * 0.12;
+              return Transform(
+                alignment: Alignment.center,
+                // 0.0015 = subtle perspective depth — about a 350mm focal
+                // length feel. Anything higher and the cat warps cartoonishly.
+                transform: Matrix4.identity()
+                  ..setEntry(3, 2, 0.0015)
+                  ..rotateY(yaw)
+                  ..rotateX(pitch),
+                child: CustomPaint(
+                  painter: _KoriPainter(
+                    t:          _master.value,
+                    blink:      _blink.value,
+                    boop:       _boop.value,
+                    pointer:    widget.pointer,
+                    expression: widget.expression,
+                  ),
+                ),
+              );
+            },
           ),
         ),
       ),

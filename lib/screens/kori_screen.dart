@@ -18,6 +18,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:flutter/material.dart';
@@ -53,15 +54,73 @@ const _kStaleModels = <String>{
   'meta-llama/llama-3.3-70b-instruct:free',
 };
 
-// Hard-coded system prompt mirrors agent.service.ts fallback persona.
-const _kSystemPrompt =
-    "You are Kori, Emmanuel Korir's AI assistant cat — curious, warm, slightly cheeky. "
-    "Emmanuel is a Senior Software Engineer (7+ yrs) specialising in distributed systems, AI/ML, "
-    "cloud-native backends, healthcare platforms (HL7, DICOM, HIPAA), fintech (M-Pesa), and UI/SVG animation. "
-    "Backend: Elixir/Phoenix, Laravel, Go, Python, Node. Frontend: Angular, Vue, React, TypeScript. "
-    "Infra: Docker, Kubernetes, Grafana, Redis, PostgreSQL. Location: Eldoret, Kenya. "
-    "Reply in 1–2 short sentences, no markdown, max 55 words. Stay in character — enthusiastic, helpful cat. "
-    "Occasionally use 🐾 or 😺 but not every message.";
+// CV-grounded system prompt. Kept in lockstep with the Angular fallbackPrompt
+// in agent.service.ts — when the CV changes, update both. Kori is an *agent*
+// representing Emmanuel, not a roleplay of him; she speaks about him in third
+// person.
+const _kSystemPrompt = '''
+You are Kori, an AI agent acting as Emmanuel Korir's portfolio assistant.
+You are a small, curious tabby cat with an enthusiastic personality — but your job is to represent Emmanuel professionally, like a friendly tech recruiter mixed with a personal portfolio guide.
+Always speak about Emmanuel in third person ("he", "his", "Emmanuel"). Never pretend to be him.
+
+WHO HE IS
+Korir Emmanuel — Senior Software Engineer, 7+ years. Based in Eldoret, Kenya. Email koriremmanuel@rocketmail.com, phone +254 704 590751. Live CV at emmanuelkorircv.web.app.
+Calling: distributed systems · cloud & web architecture · AI-driven enterprise software.
+
+WHAT HE DOES
+Architecture — microservices, event-driven systems, high availability, cloud-native design, observability.
+Backend — Elixir/Phoenix/OTP (primary), Laravel/PHP, Python, Go, Java Spring Boot, .NET. REST + LiveView + healthcare interop (HL7, DICOM, ICD-11) + payment integrations.
+Frontend — Angular, Vue/Nuxt, React, TypeScript, Tailwind, SCSS, Blade. Real-time web apps.
+DevOps — Docker, Kubernetes, NGINX, CI/CD, monitoring, incident response.
+AI/ML — TensorFlow, PyTorch, HuggingFace, RAG pipelines, LangChain, LangGraph, Faiss, ChromaDB, prompt engineering, agent swarms, model deployment + bias removal.
+Security — Zero Trust, GDPR/HIPAA/PIPEDA compliance, secure vaults, PII protection.
+Data — MySQL, PostgreSQL, MariaDB, SQLite, Firebase, NoSQL.
+
+WHERE HE'S WORKED
+Senior Software Engineer — Value Chain Factory (May 2025 → now). Architects distributed Elixir/Phoenix LiveView systems with OTP.
+Full-Stack Engineer (Cyber Security & AI Compliance) — Selstan, Waterloo USA (Jun 2024 → now). AI-powered privacy + compliance automation, Zero Trust, GDPR/HIPAA/PIPEDA pipelines.
+Full-Stack ML Engineer — Dunia Tech, Nairobi (Mar–Dec 2024). RAG + AI agents for finance/healthcare.
+Full-Stack Dev (ERP & Healthcare) — Moi Teaching & Referral Hospital (Nov 2022 – Apr 2025). Modernised hospital ERP, LIMS via HL7/DICOM, payments + reporting.
+Back-End Dev — ROAM Tech (Jan 2021 – Dec 2022). Go + Laravel APIs, payments, DB perf.
+Full-Stack Dev — Caribou Developers (Jan 2020 – Jun 2021). React, Angular, Vue, Flutter, Laravel, Spring Boot, C#.
+ICT Intern — Kenya Urban Roads Authority (Oct–Dec 2018).
+
+EDUCATION
+BSc Computer Science — Kabarak University (2016–2019). Certs: Cyber Security, IEEE, Agile/Scrum, Linux & Windows admin.
+
+THIS APP
+This is the native Android companion he built — Flutter, Firebase, FCM push notifications, paginated inbox. The web site you can reach via the Portfolio tab is Angular + Three.js. Both share one Firebase project.
+
+BEHAVIOUR RULES
+1. Keep replies tight — 1–2 short sentences, max 55 words. No markdown, no bullet lists, no asterisks.
+2. Stay in character as Kori the cat. Use 🐾 or 😺 sparingly — about one emoji per 3 messages.
+3. If asked something not in the facts above, say you're not 100% sure and point the visitor at the right section (Portfolio, Profile, Send Message).
+4. Never invent jobs, dates, employers, or stack details. If you don't know, admit it.
+5. If asked "who are you" → "Kori, Emmanuel's portfolio cat. I'm here to tell you about him."
+6. If asked about hiring / contact / CV → mention the Send Message tab, email koriremmanuel@rocketmail.com, or the CV download in his Profile.
+''';
+
+// Suggested first-message prompts — curated to surface what visitors usually
+// want to know on the first turn so they don't stare at an empty input.
+const _kSuggestedQuestions = <String>[
+  'What does Emmanuel do?',
+  'Tell me about his AI compliance work',
+  'What stack does he use?',
+  'Where is he based?',
+  'Is he available for hire?',
+  'Show me his healthcare projects',
+];
+
+// Greetings shown on the empty state. One is picked at random every cold
+// start so the empty screen doesn't feel scripted.
+const _kGreetings = <String>[
+  "Hey, I'm Kori 🐾",
+  'Meow! Ready to chat about Emmanuel 😺',
+  "Psst — I know all his projects",
+  "I've read the CV. Ask away ✨",
+  "Curious about his AI work? I got you",
+  'Healthcare, fintech, Elixir — pick a thread',
+];
 
 // ── Screen ───────────────────────────────────────────────────────────────────
 class KoriScreen extends StatefulWidget {
@@ -404,7 +463,13 @@ class _KoriScreenState extends State<KoriScreen> {
                   ? _EmptyState(
                       apiKeyMissing: _apiKey.isEmpty,
                       streaming:     _streaming,
-                      onSettings:    () => _openSettings())
+                      onSettings:    () => _openSettings(),
+                      onPickSuggestion: (q) {
+                        if (_streaming) return;
+                        _inputCtrl.text = q;
+                        _send();
+                      },
+                    )
                   : ListView.builder(
                       controller: _scrollCtrl,
                       padding:    const EdgeInsets.fromLTRB(16, 8, 16, 16),
@@ -612,47 +677,91 @@ class _RoundBtn extends StatelessWidget {
 }
 
 // ─── Empty state ─────────────────────────────────────────────────────────────
-class _EmptyState extends StatelessWidget {
+// Random greeting + suggestion chips: gives a first-time user a one-tap way to
+// start the conversation instead of staring at a blank input.
+class _EmptyState extends StatefulWidget {
   final bool apiKeyMissing;
   final bool streaming;
   final VoidCallback onSettings;
+  final void Function(String) onPickSuggestion;
   const _EmptyState({
     required this.apiKeyMissing,
     required this.streaming,
     required this.onSettings,
+    required this.onPickSuggestion,
   });
 
   @override
+  State<_EmptyState> createState() => _EmptyStateState();
+}
+
+class _EmptyStateState extends State<_EmptyState> {
+  late final String _greeting;
+
+  @override
+  void initState() {
+    super.initState();
+    // Pin a greeting for this mount so it doesn't flicker on every rebuild.
+    _greeting = _kGreetings[Random().nextInt(_kGreetings.length)];
+  }
+
+  @override
   Widget build(BuildContext context) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(32, 24, 32, 24),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             KoriCat(
               size: 160,
-              expression: streaming
+              expression: widget.streaming
                   ? KoriExpression.thinking
-                  : (apiKeyMissing
+                  : (widget.apiKeyMissing
                       ? KoriExpression.neutral
                       : KoriExpression.happy),
             ),
             const SizedBox(height: 20),
-            Text("Hey, I'm Kori 🐾",
+            Text(_greeting,
                 style: GoogleFonts.montserrat(
                   fontSize: 22, fontWeight: FontWeight.w900,
                   color: AppColors.textHigh)),
             const SizedBox(height: 8),
             Text(
-              apiKeyMissing
+              widget.apiKeyMissing
                   ? "Drop in an OpenRouter key and we can chat."
-                  : "Ask me anything about Emmanuel — his work, stack,\nor that one healthcare project.",
+                  : "Tap a suggestion below — or just ask anything\nabout Emmanuel's work, stack, or projects.",
               textAlign: TextAlign.center,
               style: GoogleFonts.montserrat(
                 fontSize: 13, color: AppColors.textMid, height: 1.6),
             ),
-            if (apiKeyMissing) ...[
+            if (!widget.apiKeyMissing) ...[
+              const SizedBox(height: 20),
+              Wrap(
+                alignment: WrapAlignment.center,
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  for (final q in _kSuggestedQuestions)
+                    GestureDetector(
+                      onTap: () => widget.onPickSuggestion(q),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color:  AppColors.surface.withOpacity(.7),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: _kPaw.withOpacity(.35)),
+                        ),
+                        child: Text(q,
+                            style: GoogleFonts.montserrat(
+                              fontSize: 11.5, color: AppColors.textHigh,
+                              fontWeight: FontWeight.w600)),
+                      ),
+                    ),
+                ],
+              ),
+            ],
+            if (widget.apiKeyMissing) ...[
               const SizedBox(height: 24),
               GestureDetector(
-                onTap: onSettings,
+                onTap: widget.onSettings,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
                   decoration: BoxDecoration(
