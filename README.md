@@ -1,42 +1,59 @@
+<div align="center">
+
 # Portfolio Admin
 
-Flutter app that pairs the [Angular portfolio site](https://emmanuel1017.github.io/Angular-Resume/) with a native admin layer:
+The Android companion for [my portfolio site](https://emmanuel1017.github.io/Angular-Resume/).
 
-- **Portfolio** — embeds the live Angular site in a full-screen WebView with native chrome, momentum scroll, and per-section nav.
-- **Kori** — native chat tab. The Angular site's Three.js cat assistant is hidden inside the WebView (saves a Web Worker + WebGL canvas + ~2 MB of JS); Flutter replaces it with a native `CustomPainter` cat + OpenRouter chat client.
-- **Profile · Admin · Messages** — live availability toggle, dashboard analytics, paginated inbox with read/unread state, push-notified by Firebase Cloud Messaging.
-- **Guest mode** — view portfolio, see profile, send a message (no admin features).
+[![Download APK](https://img.shields.io/badge/Download-APK%20v1.0.0-F4934A?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk)
+[![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
+[![Firebase](https://img.shields.io/badge/Firebase-FCM%20%C2%B7%20Firestore%20%C2%B7%20Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
+[![Renderer](https://img.shields.io/badge/Renderer-Impeller%20%2F%20Vulkan-7CB9E8?style=for-the-badge)](https://docs.flutter.dev/perf/impeller)
 
-Releases · [v1.0.0 APK](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk)
+</div>
 
 ---
 
-## Architecture
+The site already does most of what a portfolio needs. I wanted the app to do the things the site can't: get pushed when someone messages me, toggle availability without opening a laptop, and run Kori without dragging a WebGL cat and a Web Worker around on a phone.
+
+So the app embeds the site, then carves out a handful of native screens to handle the parts that should be native.
+
+| Tab | What it is |
+| --- | --- |
+| Portfolio | The Angular site, full-screen, with native chrome on top |
+| Kori | Native chat. The web's Three.js cat gets hidden in-app and replaced with a 2D one I painted in Flutter |
+| Profile | Stack, contacts, availability toggle |
+| Admin | Live controls (availability, contact form on/off, banner copy, etc) |
+| Messages | Inbox for the contact form. Push-notified, paginated, with read state |
+| Send a message | Guest-only, themed to match the rest |
+
+---
+
+## How it fits together
 
 ```mermaid
 graph TD
-    M[main.dart<br/>Firebase · FCM · orientation lock · image cache] --> A{app.dart<br/>Auth stream}
+    M["main.dart<br/>Firebase + FCM"] --> A{"app.dart<br/>auth stream"}
 
-    A -->|signed in| H[HomeScreen — 5 tabs]
-    A -->|guest|     G[GuestHomeScreen — 4 tabs]
+    A -->|"signed in"| H["HomeScreen (5 tabs)"]
+    A -->|"guest"| G["GuestHomeScreen (4 tabs)"]
 
     H --> H1[Portfolio]
     H --> H2[Kori]
     H --> H3[Profile]
-    H --> H4[Admin Console]
+    H --> H4[Admin]
     H --> H5[Messages]
 
     G --> G1[Portfolio]
     G --> G2[Kori]
     G --> G3[Profile]
-    G --> G4[Send Message]
+    G --> G4[Send]
 
-    H1 --> WV[WebViewController<br/>UA marker · EagerGestureRecognizer · CSS injection]
+    H1 --> WV["WebView<br/>UA marker + CSS"]
     G1 --> WV
-    WV -->|loads| ANG[Angular Portfolio<br/>github.io]
+    WV -->|loads| ANG["Angular site"]
 
-    H2 --> KC[KoriCat — CustomPainter]
-    H2 --> OR[OpenRouter HTTP · SSE stream]
+    H2 --> KC["KoriCat<br/>CustomPainter"]
+    H2 --> OR["OpenRouter SSE"]
     G2 --> KC
     G2 --> OR
 
@@ -45,200 +62,229 @@ graph TD
     H3 --> FS
     G4 --> FS
 
-    FS -->|onDocumentCreated| CF[Cloud Function<br/>notifyAdminsOnNewContact]
-    CF --> FCM[FCM multicast]
-    FCM -->|push| FCMS[FcmService<br/>foreground / background / terminated]
-    FCMS -.deep-link.-> H5
+    FS -->|onCreate| CF["Cloud Function"]
+    CF --> FCM["FCM multicast"]
+    FCM -->|push| FCMS["FcmService"]
+    FCMS -.->|deep-link| H5
 
-    subgraph Native GPU stack
-        IM[Impeller · Vulkan]
-        OGL[OpenGL ES 3.0 fallback]
-        HZ[120 Hz preferred display mode]
-        SP[Sustained performance mode]
-    end
+    classDef entry fill:#1a2540,stroke:#A8E87A,color:#E8F5E0,stroke-width:2px;
+    classDef native fill:#161D2E,stroke:#5A8C3E,color:#E8F5E0;
+    classDef cloud fill:#0D1321,stroke:#F4934A,color:#FFB67A,stroke-width:2px;
+    classDef store fill:#1A2540,stroke:#FFCA28,color:#FFE39A;
+
+    class M,A entry;
+    class H,G,H1,H2,H3,H4,H5,G1,G2,G3,G4,KC native;
+    class CF,FCM,FCMS,WV,OR,ANG cloud;
+    class FS store;
 ```
 
-### Tab memory model
-
-| Tab | Strategy | Reason |
-|-----|----------|--------|
-| All tabs incl. WebView | `if (_tab == N)` — destroyed on leave | Fully releases GPU surface, Chromium instance, Firestore streams, and chat history on every tab switch. Android HTTP disk cache reloads the Angular site in ~300 ms on return — far cheaper than keeping a live WebView surface pinned in GPU memory. |
+Every tab is mounted with `if (_tab == N)`, so leaving a tab destroys it. The WebView, its Chromium instance, the GPU surface, any Firestore subscriptions, Kori's chat history - all of it goes. Coming back to a tab re-mounts from scratch, and Android's HTTP disk cache reloads the Angular site in about 300 ms. That's cheaper than keeping a WebView pinned in GPU memory the whole session.
 
 ---
 
-## What's inside
+## Kori, natively
 
-### 1. Native Kori (replaces Angular's Three.js cat in-app)
+The web Kori is a fun thing - Three.js cat, procedural tabby texture on a CanvasTexture, a Web Worker doing in-browser Transformers.js inference if you ask it to. None of that belongs on a phone the user is already running my app on.
 
-The web Kori uses Three.js + a CanvasTexture mackerel-tabby + a Web Worker for in-browser Transformers.js. That's great for the web; it's wrong for a phone. Inside the Flutter WebView the entire `<app-agent>` is hidden via a UA marker:
+So inside the WebView, I tag the user-agent and inject a flag:
 
 ```dart
-_ctrl.setUserAgent('… PortfolioAdminFlutter/1.0 …');
-_ctrl.runJavaScript('window.__FLUTTER_APP__ = true; …');
+_ctrl.setUserAgent('... PortfolioAdminFlutter/1.0 ...');
+_ctrl.runJavaScript('window.__FLUTTER_APP__ = true;');
 ```
 
-Angular checks the flag and skips rendering `<app-agent>` entirely. In its place the app ships a **native chat tab**:
+Angular sees the flag and skips rendering `<app-agent>` entirely. The WebView gets a defensive `display: none !important` on it too, in case the JS arrives late. That's a couple of megs of JS, a worker thread, and a WebGL canvas that simply never load.
 
-- `lib/widgets/kori_cat.dart` — 2D animated cat in a single `CustomPainter`. Orange-tabby palette mirroring the web cat (`#F4934A` / `#D97A37`), idle breathing (4 s sine), tail wag (2 Hz), independent ear twitches, random blinks every 2.5–5.5 s, forehead M-marking, whiskers, paw highlights. Pupils track an optional `Offset`; tap → "boop" reaction (squish + surprised expression). One `AnimationController` drives the master loop, two short ones for blink + boop — `RepaintBoundary` isolates the whole thing.
-- `lib/screens/kori_screen.dart` — OpenRouter HTTP client with **SSE token streaming** parsed straight off the byte stream. System prompt mirrors `agent.service.ts` (Eldoret, distributed-systems Senior SWE, cat persona). Default model = `openai/gpt-4o-mini`, stale-model auto-migration list copied verbatim from the Angular service so users with broken `:free` IDs get bumped to the current default on next open.
-- API key resolution mirrors Angular exactly:
-  1. User-pasted key from the settings sheet (`shared_preferences`).
-  2. Falls back to `openrouter_api_key` from **Firebase Remote Config** (one shared key for all signed-in admins, no per-device setup).
-- Cancelable streams, friendly errors (`401 → "invalid key, tap ⚙"`, `429`, `SocketException`).
+In its place there's a native tab with two pieces:
 
-### 2. FCM end-to-end
+**The cat** lives in `lib/widgets/kori_cat.dart`. One `CustomPainter`, same orange palette as the web cat (`#F4934A` / `#D97A37`). It breathes on a 4-second sine, the tail wags at 2 Hz, ears twitch independently, blinks happen at random 2.5-5.5 second intervals. There's a forehead M-marking, whiskers, paw highlights. Tap it and it boops - a quick squish plus a surprised expression. One master `AnimationController` drives everything, two short ones handle blink and boop. The whole thing sits inside a `RepaintBoundary` so it costs nothing when other parts of the screen redraw.
 
-| Layer | What it does |
-|-------|--------------|
-| Angular | Writes `/contacts/{id}` to Firestore on contact-form submit, with `timestamp: serverTimestamp()`, `read: false`, `source: 'web'`. |
-| Cloud Function | `functions/index.js` — `onDocumentCreated('contacts/{id}')` reads `/admin_tokens`, sends `sendEachForMulticast` with title/body + data payload (contactId, name, email, source, themed channel/color). Prunes `registration-token-not-registered` tokens in the same invocation. |
-| Flutter | `lib/services/fcm_service.dart` registers a top-level background-isolate handler, requests notification permission, hooks `onMessage` / `onMessageOpenedApp` / `getInitialMessage` for foreground / background / cold-start tap respectively. Foreground heads-up rendered via `flutter_local_notifications` with `BigTextStyleInformation` and the app's mint-green accent so it reads as part of the app. Token is saved to `/admin_tokens/{token}` on admin sign-in and deleted on sign-out. Tap → `pendingHomeTab = 4` → HomeScreen jumps to Messages. |
+**The chat** is `lib/screens/kori_screen.dart`. Plain `http.Client` posting to OpenRouter with `stream: true`, then parsing `data:` lines straight off the byte stream as they arrive. The system prompt is lifted from the Angular service, same cat persona, same biographical facts. Default model is `openai/gpt-4o-mini` and I carry the same stale-model migration list as the web - anyone who saved one of the now-broken `:free` models gets quietly bumped onto the working default next open.
 
-Deploy the function from repo root:
-
-```bash
-cd functions && npm install
-firebase use --add        # one-time
-firebase deploy --only functions:notifyAdminsOnNewContact
-```
-
-Requires the Blaze plan. `AndroidManifest.xml` declares `POST_NOTIFICATIONS`, `WAKE_LOCK`, `VIBRATE`, default channel id `portfolio_contacts`, default color `@color/notification_accent` (mint green). `flutter_local_notifications` requires core library desugaring — wired up in `app/build.gradle.kts`.
-
-### 3. Messages — perf-focused inbox
-
-| Win | How |
-|-----|-----|
-| Legacy 2022 docs now appear | Server-side `orderBy('timestamp')` silently dropped docs without the field. Dropped to plain `.limit(300)` and sort client-side with `Timestamp` → legacy `date` string fallback. |
-| Tapping a card doesn't redraw the list | Expansion lives in `ValueNotifier<String?>` (the doc id). Only the two affected cards rebuild. |
-| Cards don't bleed paint into each other | Each row is wrapped in its own `RepaintBoundary`. |
-| Regex / date parsing doesn't re-run on snapshots | `_MsgRow` wrapper memoizes sort key + read flag; the per-id cache survives across snapshot rebuilds. |
-| Initial render stays small | Windowed display (60 rows initial, `+40` per "Load older" tap). Firestore stream still feeds the underlying snapshot in real time. |
-| Fast scrolls don't show blank gaps | `cacheExtent: 800` pre-builds a screen-and-a-half. |
-| Pull-to-refresh | `RefreshIndicator` resets the window to 60. |
-| New actions | "Copy email" + "Mark unread" toggles inside the expanded card. |
-
-### 4. Companion-app integration on the web
-
-Inside the WebView the heavy components stay hidden (UA sniff + JS flag + defensive CSS injection). Outside the WebView (regular browsers) the Angular site gains:
-
-- A sticky orange **promo banner** above the header, dismissible (`localStorage.promoBannerDismissed`), tap-to-scroll to `#app`.
-- A pulsing orange **"Get the App"** pill in the nav.
-- A **`<app-screenshots>`** section with a 12-shot phone-mockup carousel + Download APK / View source CTAs.
+The API key resolves the same way as on the web: a user-pasted key wins, otherwise we fall back to `openrouter_api_key` from Firebase Remote Config. That means I can change one key in the console and every signed-in admin device picks it up on next launch.
 
 ---
 
-## Performance decisions
+## Push, from form to phone
 
-### Android GPU
-- **Impeller / Vulkan** (`EnableImpeller=true` in manifest) — pre-compiles all shaders at launch, eliminating JIT shader jank during scroll and animation. Automatic OpenGL ES 3.0 fallback on older SOCs.
-- **Sustained performance mode** (`setSustainedPerformanceMode(true)`) — holds clocks at a thermally stable level, preventing the boost → overheat → throttle → jank cycle on mid/low-end devices.
-- **120 Hz** — `preferredDisplayModeId` set to highest available refresh in `onResume`; `allow_multiple_resumed_activities=true` enables variable refresh scheduling on Android 11+.
+When someone submits the contact form on the site - or via the guest screen in the app - a doc lands in `/contacts/{id}`. From there:
 
-### WebView scroll
-- `EagerGestureRecognizer` on `WebViewWidget` removes the ~80 ms Flutter gesture-arena delay before scroll starts.
-- CSS injection overrides `scroll-behavior: auto` (kills Angular router smooth-scroll fighting momentum); `transform: translateZ(0)` on `body` promotes the scroll container to its own GPU compositor layer.
-- `content-visibility: auto` on Angular sections skips off-screen paint; `contain: layout style` on cards isolates reflows so one card's resize can't cascade.
-- Defensive `display: none !important` on `app-agent`, `.screenshots-section`, `.promo-banner`, `.get-app-cta` — heavy components that have native counterparts in the app shouldn't render at all in-WebView.
+```mermaid
+sequenceDiagram
+    participant V as Visitor
+    participant FS as Firestore /contacts
+    participant CF as Cloud Function
+    participant TK as /admin_tokens
+    participant FCM as FCM
+    participant A as Admin device
 
-### Flutter widget tree
-- All dynamic state flows through `ValueNotifier` — the `WebViewWidget` never rebuilds; only the 2 px progress bar or unread badge re-renders.
-- `RepaintBoundary` around bottom nav, top chrome, each Kori cat, and each message card.
-- `MarqueeLabel` measures text off-layout via `TextPainter`, drives scroll with `AnimatedBuilder` + hoisted child — only the `Transform` node repaints per frame.
-- Kori chat history is in-memory only; tab teardown clears the stream subscription, the HTTP client, the controller, and the cat's `AnimationController`s.
-
-### Release build
-- R8 full mode (`android.enableR8.fullMode=true`) with `isMinifyEnabled` + `isShrinkResources` — whole-program dead-code elimination across Flutter, Firebase, and FCM/messaging.
-- Core library desugaring (`coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")`) — required by `flutter_local_notifications`; back-ports `java.time` onto older Android.
-- ABI filter: `arm64-v8a` + `armeabi-v7a` only — ~30 % smaller APK, no x86 overhead on real devices.
-- Parallel Gradle (`org.gradle.parallel=true`) + build caching.
-
----
-
-## Project structure
-
-```
-lib/
-├── main.dart                       Firebase + FCM init, orientation lock, image cache,
-│                                   navigatorKey + pendingHomeTab for FCM deep-links
-├── app.dart                        Auth stream → HomeScreen / GuestHomeScreen router
-├── theme/app_theme.dart            Design tokens
-├── services/
-│   ├── portfolio_service.dart      Firestore read/write (availability toggle, autoOn)
-│   └── fcm_service.dart            Token persistence, foreground heads-up, deep-link routing
-├── screens/
-│   ├── home_screen.dart            Admin shell: 5-tab nav, unread-count stream, FCM tab consumer
-│   ├── guest_home_screen.dart      Guest shell: 4-tab nav
-│   ├── portfolio_screen.dart       Full-screen WebView · UA marker · CSS injection · section nav
-│   ├── kori_screen.dart            Native chat tab — OpenRouter SSE, Remote Config key
-│   ├── profile_screen.dart         Avatar, bio, availability toggle
-│   ├── dashboard_screen.dart       Analytics + admin controls + sign-out (clears FCM token)
-│   ├── messages_screen.dart        Paginated inbox · _MsgRow memo · ValueNotifier expansion
-│   ├── guest_contact_screen.dart   Visitor message form → Firestore
-│   └── splash_screen.dart, login_screen.dart, create_admin_screen.dart
-└── widgets/
-    ├── kori_cat.dart               2D animated cat — CustomPainter, blink/wag/breath/boop
-    └── marquee_label.dart          Auto-scrolling nav label (TextPainter + AnimatedBuilder)
-
-functions/
-├── index.js                        notifyAdminsOnNewContact — FCM fan-out + stale-token prune
-├── package.json                    firebase-admin + firebase-functions v6
-└── README.md                       Deploy + emulator instructions
-
-android/
-├── app/build.gradle.kts            R8, ABI filter, ProGuard, coreLibraryDesugaring
-├── app/proguard-rules.pro          Keep rules: Flutter / Firebase / WebView JS bridge
-├── gradle.properties               parallel, caching, R8 full mode, Kotlin incremental
-└── app/src/main/
-    ├── AndroidManifest.xml         Impeller, 120 Hz, FCM permissions + default channel + color
-    ├── res/values/colors.xml       notification_accent (mint green)
-    └── kotlin/.../MainActivity     Sustained perf mode + high-refresh-rate request
-
-ios/ · windows/ · linux/            Platform scaffolds — Firebase config still needed before build
+    V->>FS: addDoc({name, email, message, timestamp})
+    FS-->>CF: onCreate trigger
+    CF->>TK: read all admin tokens
+    CF->>FCM: sendEachForMulticast
+    FCM-->>A: push (fg / bg / terminated)
+    A->>A: themed heads-up + tap deep-link
+    A-->>FS: doc.update({read: true})
+    CF-->>TK: prune dead tokens
 ```
 
----
+The Cloud Function (`functions/index.js`) listens to `onDocumentCreated('contacts/{id}')`, reads every token in `/admin_tokens`, fires a multicast, and prunes anything FCM rejects with `registration-token-not-registered`. That keeps the token list from rotting over time without a separate cron.
 
-## Run
+The Flutter side is `lib/services/fcm_service.dart`. The background isolate handler is a top-level function (it has to be - the OS spawns a fresh isolate for it). Foreground messages get rendered locally by `flutter_local_notifications` so the heads-up still appears while the app is open - FCM doesn't draw banners when your app is in the foreground, you have to do it yourself. Background and terminated taps route to the Messages tab via a tiny `ValueNotifier<int?>` that `HomeScreen` reads on next build.
 
-```bash
-# Install deps + grab Firebase config first
-flutter pub get
-# Drop google-services.json into android/app/  (not committed — contains creds)
+Tokens persist to `/admin_tokens/{token}` when an admin signs in and get deleted on sign-out, so logging out actually stops the pushes. Guests never write a token, so they never get notified.
 
-# List connected devices
-flutter devices
-
-# Debug — hot reload, no R8
-flutter run -d <device-id>
-
-# Release — Impeller + R8 + ABI filters active
-flutter run -d <device-id> --release
-
-# Or build APK and side-load
-flutter build apk --release
-adb install -r build/app/outputs/flutter-apk/app-release.apk
-```
-
-### Deploy the Cloud Function (one-time)
+Deploy once:
 
 ```bash
 cd functions
 npm install
-firebase use --add                                  # pick the right project
+firebase use --add
 firebase deploy --only functions:notifyAdminsOnNewContact
 ```
 
-After deploy, every new submission to `/contacts/*` will push to every device registered in `/admin_tokens`. Devices register on admin sign-in (`FcmService.init`) and unregister on sign-out (`FcmService.clearTokenOnSignOut`).
+You need the Blaze plan for any Cloud Function in 2025+, but the function itself stays comfortably within the free tier (2M invocations/month).
 
 ---
 
-## Firebase Remote Config keys
+## Why messages feel fast
+
+The first version of the inbox stuttered on a long list and dropped any contact saved before I added the `timestamp` field. Three fixes:
+
+The `orderBy('timestamp', desc)` server-side query was silently filtering out every doc missing the field. That includes all of my pre-2023 contacts. I dropped the orderBy, fetched up to 300 rows, and sort client-side by `Timestamp` with a fallback to parsing the legacy `date` string.
+
+Tapping a card used to call `setState` on the screen, which rebuilt the whole `ListView`. Now expansion lives in a `ValueNotifier<String?>` holding the open doc's id. Only the two affected cards rebuild.
+
+Each row gets its own `RepaintBoundary` and a memoized wrapper (`_MsgRow`) caches the sort key and read flag across snapshots. The visible list is windowed - 60 rows initial, "Load older" bumps it by 40 - so the underlying Firestore stream stays real-time but the `ListView.builder` only walks what's on screen.
+
+Pull-to-refresh resets the window. There's a "Mark unread" and a "Copy email" inside the expanded card.
+
+---
+
+## The web side, in passing
+
+Outside the WebView the Angular site grew three small things to point at the app:
+
+- A sticky orange banner above the header that slides in after the hero animation, dismissible with a close button (saved in `localStorage`). Tapping it scrolls to the screenshots section. It publishes its measured height to `--promo-banner-height`, and the floating header reads that with `top: calc(14px + var(--promo-banner-height, 0px))` so they move together instead of overlapping.
+- A pulsing orange "Get the App" pill in the nav.
+- A new `<app-screenshots>` section with a phone-mockup carousel of 12 shots, a Download APK button, and a View source button.
+
+Inside the WebView all three are hidden by the UA sniff and a belt-and-braces CSS injection, so they never render twice.
+
+---
+
+## Perf notes worth keeping
+
+<details>
+<summary><strong>Android GPU</strong></summary>
+
+`EnableImpeller=true` in the manifest turns on Vulkan with AOT shader compilation, which kills the JIT shader jank Flutter used to have on first paint. OpenGL ES 3.0 is the automatic fallback on older SoCs.
+
+`setSustainedPerformanceMode(true)` in `MainActivity.onCreate` holds the CPU/GPU clocks at a thermally stable level. Stops the boost-throttle-jank cycle on mid-range phones.
+
+`allow_multiple_resumed_activities=true` lets the OS variable-refresh on Android 11+, and `preferredDisplayModeId` picks the highest available - 120 Hz on the phones that have it.
+</details>
+
+<details>
+<summary><strong>WebView scroll</strong></summary>
+
+`EagerGestureRecognizer` on the WebView claims touches immediately instead of waiting for Flutter's gesture arena, which removes about 80 ms of "is this a scroll?" latency before the page actually moves.
+
+Injected CSS overrides Angular's smooth scroll (`scroll-behavior: auto !important`), adds `transform: translateZ(0)` on body to promote the scroll container to its own GPU layer, and applies `content-visibility: auto` to long sections so off-screen ones skip paint entirely. Cards get `contain: layout style` so a resize on one card can't reflow its siblings.
+
+Heavy components that have native counterparts (`app-agent`, `.screenshots-section`, `.promo-banner`, `.get-app-cta`) get `display: none !important` in the injection too. Belt and braces - even if the UA detection in Angular missed.
+</details>
+
+<details>
+<summary><strong>Flutter widget tree</strong></summary>
+
+The `WebViewWidget` never rebuilds. Every piece of dynamic chrome around it (progress bar, back button, section pills, unread badge) is driven by a `ValueNotifier`, so only that tiny widget repaints when its value changes. `RepaintBoundary` wraps the bottom nav, top chrome, each Kori cat, and each message card.
+
+`MarqueeLabel` measures off-layout with a `TextPainter` and animates a single `Transform` via `AnimatedBuilder` with a hoisted child, so it's one paint per frame even when multiple labels are scrolling.
+
+Kori chat history is in-memory. Tab teardown cancels the stream subscription, closes the HTTP client, disposes the controllers, and the cat's animation controllers go with it.
+</details>
+
+<details>
+<summary><strong>Release build</strong></summary>
+
+R8 full mode is on (`android.enableR8.fullMode=true`), with `isMinifyEnabled` + `isShrinkResources`. That gives whole-program dead-code elimination across Flutter, Firebase, and FCM.
+
+Core library desugaring is enabled because `flutter_local_notifications` needs it - backports `java.time` onto older Android via `desugar_jdk_libs:2.1.4`.
+
+ABI filter is `arm64-v8a + armeabi-v7a` only. Drops about 30% off the APK and there's no x86 hardware out there that benefits from a third build.
+
+Gradle is parallel and caching is on (`gradle.properties`).
+</details>
+
+---
+
+## Project layout
+
+```text
+lib/
+|-- main.dart                       Firebase + FCM init, navigatorKey, pendingHomeTab
+|-- app.dart                        Auth stream router
+|-- theme/app_theme.dart            Design tokens
+|-- services/
+|   |-- portfolio_service.dart      Firestore: availability toggle, autoOn
+|   `-- fcm_service.dart            Token persistence, heads-up, deep-link routing
+|-- screens/
+|   |-- home_screen.dart            Admin shell (5 tabs)
+|   |-- guest_home_screen.dart      Guest shell (4 tabs)
+|   |-- portfolio_screen.dart       WebView, UA marker, CSS injection, section nav
+|   |-- kori_screen.dart            Native chat - OpenRouter SSE, Remote Config key
+|   |-- profile_screen.dart         Avatar, bio, availability toggle
+|   |-- dashboard_screen.dart       Admin controls, sign-out clears FCM token
+|   |-- messages_screen.dart        Paginated inbox, ValueNotifier expansion
+|   |-- guest_contact_screen.dart   Visitor message form
+|   `-- splash / login / create_admin
+`-- widgets/
+    |-- kori_cat.dart               2D animated cat
+    `-- marquee_label.dart          Auto-scrolling nav label
+
+functions/
+|-- index.js                        notifyAdminsOnNewContact
+`-- package.json                    firebase-admin + firebase-functions v6
+
+android/
+|-- app/build.gradle.kts            R8, ABI filter, ProGuard, desugaring
+|-- app/proguard-rules.pro          Flutter / Firebase / WebView keep rules
+|-- gradle.properties               parallel, caching, R8 full mode
+`-- app/src/main/
+    |-- AndroidManifest.xml         Impeller, 120 Hz, FCM permissions, default channel
+    |-- res/values/colors.xml       notification_accent (mint green)
+    `-- kotlin/.../MainActivity     Sustained perf, high refresh request
+
+ios/ - windows/ - linux/            Platform scaffolds; Firebase config still needed
+```
+
+---
+
+## Running it
+
+```bash
+flutter pub get
+# Drop your google-services.json into android/app/ (not committed)
+
+flutter devices                                              # list connected
+flutter run -d <device-id>                                   # debug, hot reload
+flutter run -d <device-id> --release                         # release build
+
+# Or build and side-load
+flutter build apk --release
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+---
+
+## Remote Config keys
 
 | Key | Used by | Notes |
-|-----|---------|-------|
-| `openrouter_api_key` | Angular Kori + Flutter Kori | Shared OpenRouter key. Leave empty to force per-user keys. |
-| `available_for_work` | Angular `PortfolioSettingsService` | Boolean string `'true'` / `'false'`. |
+| --- | --- | --- |
+| `openrouter_api_key` | Web Kori + Flutter Kori | Shared key. Leave empty to force per-user keys. |
+| `available_for_work` | Angular `PortfolioSettingsService` | String `'true'` / `'false'`. |
 
 ---
 
-> No `google-services.json`, `GoogleService-Info.plist`, or Firebase service account is committed to either repo. Drop them in locally before building.
+No `google-services.json`, `GoogleService-Info.plist`, or Firebase service-account JSON is committed to either repo. Add them locally before building.
