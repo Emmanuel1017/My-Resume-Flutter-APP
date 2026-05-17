@@ -19,7 +19,11 @@
 
 name: Release (multi-platform)
 
-on:
+# `on` is a YAML 1.1 boolean alias for `true`. Quoting it as a string keeps
+# GitHub Actions from silently dropping the entire trigger block, which is
+# what happened on the first push of this file - the workflow registered but
+# never had a working `workflow_dispatch` or `push` trigger attached.
+"on":
   push:
     tags: ['v*']
   workflow_dispatch:
