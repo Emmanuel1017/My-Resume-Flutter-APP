@@ -27,6 +27,26 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  # Generates all the mipmap-* PNGs from a single source image. Run with:
+  #   dart run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.1
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/
+
+# ── Launcher icon ──────────────────────────────────────────────────────────────
+# Source image lives at assets/branding/icon.png (the Angular site's Caribou
+# Devs logo at 512×512). Adaptive icon uses a mint-green background so the
+# silhouette reads on Android 8+ rounded/square launcher masks.
+flutter_launcher_icons:
+  android: "ic_launcher"
+  ios: true
+  remove_alpha_ios: true
+  image_path: "assets/branding/icon.png"
+  adaptive_icon_background: "#161D2E"
+  adaptive_icon_foreground: "assets/branding/icon.png"
+  windows:
+    generate: true
+    image_path: "assets/branding/icon.png"

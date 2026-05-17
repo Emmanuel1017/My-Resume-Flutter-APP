@@ -4,4 +4,5 @@
          Matches AppColors.accent (mint green) so the system notification banner
          reads as part of the app's visual language. -->
     <color name="notification_accent">#A8E87A</color>
+	<color name="ic_launcher_background">#161D2E</color>
 </resources>

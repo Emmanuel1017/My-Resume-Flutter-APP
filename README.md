@@ -17,6 +17,33 @@ The site already does most of what a portfolio needs. I wanted the app to do the
 
 So the app embeds the site, then carves out a handful of native screens to handle the parts that should be native.
 
+---
+
+## Screenshots
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/01-welcome.png" alt="Welcome" width="220" /><br/><sub><b>Welcome</b><br/>Sign in or browse as guest</sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/02-portfolio.png" alt="Portfolio" width="220" /><br/><sub><b>Portfolio</b><br/>Angular site, native chrome</sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/03-showcase.png" alt="Showcase" width="220" /><br/><sub><b>About</b><br/>Stack &middot; years &middot; domains</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/04-projects.png" alt="Projects" width="220" /><br/><sub><b>Things I&rsquo;ve Built</b><br/>Project carousel</sub></td>
+    <td align="center"><img src="docs/screenshots/05-kori.png" alt="Kori" width="220" /><br/><sub><b>Kori</b><br/>Native chat with the cat</sub></td>
+    <td align="center"><img src="docs/screenshots/06-kori-settings.png" alt="Kori settings" width="220" /><br/><sub><b>Kori Settings</b><br/>OpenRouter via Remote Config</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/07-profile.png" alt="Profile" width="220" /><br/><sub><b>Profile</b><br/>Availability toggle &middot; bio</sub></td>
+    <td align="center"><img src="docs/screenshots/08-experience.png" alt="Experience" width="220" /><br/><sub><b>Experience</b><br/>Timeline &middot; education &middot; certs</sub></td>
+    <td align="center"><img src="docs/screenshots/09-admin.png" alt="Admin" width="220" /><br/><sub><b>Admin Console</b><br/>Live site controls</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/10-messages.png" alt="Messages" width="220" /><br/><sub><b>Messages</b><br/>Real-time inbox</sub></td>
+    <td align="center"><img src="docs/screenshots/11-message-detail.png" alt="Message detail" width="220" /><br/><sub><b>Message Detail</b><br/>Copy email &middot; mark unread</sub></td>
+    <td align="center"><img src="docs/screenshots/12-send-message.png" alt="Send message" width="220" /><br/><sub><b>Send a Message</b><br/>Guest contact form</sub></td>
+  </tr>
+</table>
+
 | Tab | What it is |
 | --- | --- |
 | Portfolio | The Angular site, full-screen, with native chrome on top |

@@ -132,15 +132,26 @@ class _NavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bottom = MediaQuery.paddingOf(context).bottom; // sizeOf avoids full MediaQuery rebuild
-    return Container(
-      decoration: const BoxDecoration(
-        color:  AppColors.surface,
-        border: Border(top: BorderSide(color: AppColors.border, width: .8)),
-      ),
-      child: SafeArea(
-        top: false,
+    // Floating pill: insets from screen edges, rounded corners, soft shadow.
+    // SafeArea bottom inset is added as outer padding so the pill clears the
+    // gesture bar instead of getting docked to it.
+    return Padding(
+      padding: EdgeInsets.fromLTRB(14, 0, 14, 10 + bottom),
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: AppColors.border, width: .8),
+          boxShadow: [
+            BoxShadow(
+              color:      Colors.black.withOpacity(.32),
+              blurRadius: 22,
+              offset:     const Offset(0, 6),
+            ),
+          ],
+        ),
         child: SizedBox(
-          height: 56 + bottom,
+          height: 60,
           child: Row(
             children: List.generate(_items.length, (i) {
               final item   = _items[i];
