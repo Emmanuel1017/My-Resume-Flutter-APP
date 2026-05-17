@@ -52,13 +52,11 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── WebView: Offstage keeps it mounted (no reload) but removes it
-          //    from the paint tree completely when not visible → 0 GPU cost.
-          Offstage(offstage: _tab != 0, child: const PortfolioScreen()),
-
-          // ── All other tabs are destroyed on leave, rebuilt on re-entry.
-          //    Firestore streams re-attach in <50 ms — far cheaper than keeping
-          //    Profile + Dashboard + Messages all alive simultaneously.
+          // All tabs destroyed on leave — the GPU surface, Firestore streams,
+          // and WebView Chromium instance are fully released.  The Android HTTP
+          // disk cache serves the Angular site in ~300 ms on return (far cheaper
+          // than keeping a live WebView surface pinned in GPU memory at all times).
+          if (_tab == 0) const PortfolioScreen(),
           if (_tab == 1) const ProfileScreen(),
           if (_tab == 2) const DashboardScreen(),
           if (_tab == 3) const MessagesScreen(),

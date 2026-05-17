@@ -13,12 +13,12 @@ graph TD
     B -->|signed in| C[HomeScreen — 4 tabs]
     B -->|guest| D[GuestHomeScreen — 3 tabs]
 
-    C --> E[Offstage: PortfolioScreen]
+    C --> E[if-tab: PortfolioScreen]
     C --> F[if-tab: ProfileScreen]
     C --> G[if-tab: DashboardScreen]
     C --> H[if-tab: MessagesScreen]
 
-    D --> E2[Offstage: PortfolioScreen]
+    D --> E2[if-tab: PortfolioScreen]
     D --> F2[if-tab: ProfileScreen]
     D --> I[if-tab: GuestContactScreen]
 
@@ -41,8 +41,7 @@ graph TD
 
 | Tab | Strategy | Reason |
 |-----|----------|--------|
-| Portfolio WebView | `Offstage` — always mounted | Avoids 2 s reload on every tab switch |
-| All other tabs | `if (_tab == N)` — destroyed on leave | Firestore streams re-attach in < 50 ms; no memory cost while idle |
+| All tabs incl. WebView | `if (_tab == N)` — destroyed on leave | Fully releases GPU surface, Chromium instance, and Firestore streams on every tab switch. Android HTTP disk cache reloads the Angular site in ~300 ms on return — far cheaper than keeping a live WebView surface pinned in GPU memory at all times. |
 
 ---
 

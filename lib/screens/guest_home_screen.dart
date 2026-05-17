@@ -42,8 +42,7 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // WebView stays mounted via Offstage — no reload on tab switch
-          Offstage(offstage: _tab != 0, child: const PortfolioScreen()),
+          if (_tab == 0) const PortfolioScreen(),
           if (_tab == 1) const ProfileScreen(),
           if (_tab == 2) const GuestContactScreen(),
         ],
