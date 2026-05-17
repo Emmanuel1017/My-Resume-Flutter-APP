@@ -11,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../theme/app_theme.dart';
+import '../widgets/visits_charts.dart';
 
 class VisitsScreen extends StatefulWidget {
   const VisitsScreen({super.key});
@@ -71,6 +72,8 @@ class _VisitsScreenState extends State<VisitsScreen> {
                 )
               else ...[
                 SliverToBoxAdapter(child: _SummaryHeader(summary: summary)),
+                if (docs.isNotEmpty)
+                  SliverToBoxAdapter(child: VisitsCharts(docs: docs)),
                 if (docs.isEmpty)
                   const SliverFillRemaining(
                     hasScrollBody: false,
