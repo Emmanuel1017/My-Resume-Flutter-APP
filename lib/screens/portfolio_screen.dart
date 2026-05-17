@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -250,19 +251,20 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
             ),
           ),
 
-          // Loading overlay: disappears once loaded, no cost after that
-          RepaintBoundary(
-            child: ValueListenableBuilder<bool>(
-              valueListenable: _loaded,
-              builder: (_, loaded, __) {
-                if (loaded) return const SizedBox.shrink();
-                return Positioned.fill(
-                  child: ValueListenableBuilder<int>(
+          // Loading overlay — Positioned.fill must be a direct Stack child,
+          // not nested inside RepaintBoundary (which isn't a Stack).
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: ValueListenableBuilder<bool>(
+                valueListenable: _loaded,
+                builder: (_, loaded, __) {
+                  if (loaded) return const SizedBox.shrink();
+                  return ValueListenableBuilder<int>(
                     valueListenable: _progress,
                     builder: (_, prog, __) => _LoadingOverlay(progress: prog),
-                  ),
-                );
-              },
+                  );
+                },
+              ),
             ),
           ),
         ],
