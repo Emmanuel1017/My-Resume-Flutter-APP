@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../services/portfolio_service.dart';
+import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 
 // ── Cached text styles (created once, reused everywhere) ─────────────────────
@@ -126,6 +127,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _signOut() async {
     HapticFeedback.lightImpact();
+    // Delete the FCM token from /admin_tokens so this device stops receiving
+    // pushes after sign-out (otherwise the Cloud Function would keep firing
+    // here even though the user has logged out).
+    await FcmService.instance.clearTokenOnSignOut();
     await FirebaseAuth.instance.signOut();
     if (mounted) Navigator.of(context).pushReplacementNamed('/login');
   }

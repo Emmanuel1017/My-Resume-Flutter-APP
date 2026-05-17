@@ -4,11 +4,14 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/portfolio_service.dart';
+import '../services/fcm_service.dart';
+import '../main.dart' show pendingHomeTab;
 import '../widgets/marquee_label.dart';
 import 'portfolio_screen.dart';
 import 'profile_screen.dart';
 import 'dashboard_screen.dart';
 import 'messages_screen.dart';
+import 'kori_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -32,6 +35,33 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     _triggerAutoOn();
+    // Consume any FCM-tap-requested tab (e.g. tap a "new message" push from
+    // terminated state → land directly on Messages).
+    final requested = pendingHomeTab.value;
+    if (requested != null) {
+      _tab = requested.clamp(0, 4);
+      pendingHomeTab.value = null;
+    }
+    // Persist FCM token now that the user is verified signed-in.
+    FcmService.instance.init(
+      onOpen: () => mounted ? setState(() => _tab = 4) : null,
+    );
+    // Reactively listen for taps while we're already on HomeScreen.
+    pendingHomeTab.addListener(_onPendingTabChange);
+  }
+
+  void _onPendingTabChange() {
+    final t = pendingHomeTab.value;
+    if (t != null && mounted) {
+      setState(() => _tab = t.clamp(0, 4));
+      pendingHomeTab.value = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    pendingHomeTab.removeListener(_onPendingTabChange);
+    super.dispose();
   }
 
   Future<void> _triggerAutoOn() async {
@@ -57,9 +87,10 @@ class _HomeScreenState extends State<HomeScreen> {
           // disk cache serves the Angular site in ~300 ms on return (far cheaper
           // than keeping a live WebView surface pinned in GPU memory at all times).
           if (_tab == 0) const PortfolioScreen(),
-          if (_tab == 1) const ProfileScreen(),
-          if (_tab == 2) const DashboardScreen(),
-          if (_tab == 3) const MessagesScreen(),
+          if (_tab == 1) const KoriScreen(),
+          if (_tab == 2) const ProfileScreen(),
+          if (_tab == 3) const DashboardScreen(),
+          if (_tab == 4) const MessagesScreen(),
         ],
       ),
       // RepaintBoundary isolates the nav bar so unread-count updates never
@@ -92,6 +123,7 @@ class _NavBar extends StatelessWidget {
 
   static const _items = [
     _NavItem(icon: Icons.language_rounded,             label: 'Portfolio'),
+    _NavItem(icon: Icons.auto_awesome_rounded,         label: 'Kori'),
     _NavItem(icon: Icons.person_rounded,               label: 'Profile'),
     _NavItem(icon: Icons.admin_panel_settings_rounded, label: 'Admin'),
     _NavItem(icon: Icons.inbox_rounded,                label: 'Messages'),
@@ -114,7 +146,7 @@ class _NavBar extends StatelessWidget {
               final item   = _items[i];
               final active = i == selected;
               final color  = active ? AppColors.accent : AppColors.textLow;
-              final badge  = (i == 3 && unreadCount > 0 && !active)
+              final badge  = (i == 4 && unreadCount > 0 && !active)
                   ? unreadCount : 0;
 
               return Expanded(

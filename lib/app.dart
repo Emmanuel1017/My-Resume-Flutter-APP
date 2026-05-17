@@ -7,6 +7,7 @@ import 'screens/create_admin_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/guest_home_screen.dart';
 import 'theme/app_theme.dart';
+import 'main.dart' show navigatorKey;
 
 class PortfolioAdminApp extends StatelessWidget {
   const PortfolioAdminApp({super.key});
@@ -15,6 +16,7 @@ class PortfolioAdminApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MaterialApp(
       title:                      'Portfolio Admin',
+      navigatorKey:               navigatorKey,
       debugShowCheckedModeBanner: false,
       theme:                      AppTheme.dark,
       initialRoute:               '/splash',

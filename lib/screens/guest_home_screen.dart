@@ -7,6 +7,7 @@ import '../widgets/marquee_label.dart';
 import 'portfolio_screen.dart';
 import 'profile_screen.dart';
 import 'guest_contact_screen.dart';
+import 'kori_screen.dart';
 
 class GuestHomeScreen extends StatefulWidget {
   const GuestHomeScreen({super.key});
@@ -43,8 +44,9 @@ class _GuestHomeScreenState extends State<GuestHomeScreen> {
         fit: StackFit.expand,
         children: [
           if (_tab == 0) const PortfolioScreen(),
-          if (_tab == 1) const ProfileScreen(),
-          if (_tab == 2) const GuestContactScreen(),
+          if (_tab == 1) const KoriScreen(),
+          if (_tab == 2) const ProfileScreen(),
+          if (_tab == 3) const GuestContactScreen(),
         ],
       ),
       bottomNavigationBar: _GuestNavBar(selected: _tab, onSelect: _select),
@@ -60,8 +62,9 @@ class _GuestNavBar extends StatelessWidget {
   const _GuestNavBar({required this.selected, required this.onSelect});
 
   static const _items = [
-    _NavItem(icon: Icons.language_rounded,   label: 'Portfolio'),
-    _NavItem(icon: Icons.person_rounded,     label: 'Profile'),
+    _NavItem(icon: Icons.language_rounded,     label: 'Portfolio'),
+    _NavItem(icon: Icons.auto_awesome_rounded, label: 'Kori'),
+    _NavItem(icon: Icons.person_rounded,       label: 'Profile'),
     _NavItem(icon: Icons.mail_outline_rounded, label: 'Message'),
   ];
 

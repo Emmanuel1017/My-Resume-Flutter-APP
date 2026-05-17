@@ -3,6 +3,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'app.dart';
 import 'firebase_options.dart';
+import 'services/fcm_service.dart';
+
+/// Global navigator key — lets FCM (which lives outside the widget tree)
+/// push routes when a notification is tapped.
+final navigatorKey = GlobalKey<NavigatorState>();
+
+/// Set by FCM tap → HomeScreen reads this on next build to deep-link to the
+/// Messages tab. Cleared back to null after consumption.
+final pendingHomeTab = ValueNotifier<int?>(null);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -32,6 +41,17 @@ void main() async {
   // ── Firebase ───────────────────────────────────────────────────────────────
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
+  );
+
+  // ── FCM ────────────────────────────────────────────────────────────────────
+  // Init runs before runApp so the background isolate handler is registered
+  // before any push can arrive. Tapping a notification flips pendingHomeTab to
+  // 4 (Messages); HomeScreen consumes that and selects the right tab.
+  await FcmService.instance.init(
+    onOpen: () {
+      pendingHomeTab.value = 4; // Messages tab in admin home
+      navigatorKey.currentState?.pushNamedAndRemoveUntil('/home', (_) => false);
+    },
   );
 
   runApp(const PortfolioAdminApp());

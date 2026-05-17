@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Default tint applied to the notification small-icon area on Android 5+.
+         Matches AppColors.accent (mint green) so the system notification banner
+         reads as part of the app's visual language. -->
+    <color name="notification_accent">#A8E87A</color>
+</resources>

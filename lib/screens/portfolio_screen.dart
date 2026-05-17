@@ -16,8 +16,16 @@ const _portfolioUrl = 'https://emmanuel1017.github.io/Angular-Resume/';
 // Hides the Angular nav, kills scrollbars, removes overscroll bounce.
 const _injectCss = '''
 (function() {
+  // Belt-and-braces marker (UA already set, but this is reactive for Angular)
+  window.__FLUTTER_APP__ = true;
+  document.documentElement.setAttribute('data-flutter-app', 'true');
   var s = document.createElement('style');
   s.textContent = `
+    /* Heavy native-port targets — hide hard in case Angular hasn't booted yet */
+    app-agent, .agent-root,
+    .screenshots-section,
+    app-promo-banner, .promo-banner,
+    .get-app-li, .get-app-cta { display: none !important; }
     ::-webkit-scrollbar { display: none !important; }
     * { -webkit-tap-highlight-color: transparent; }
     app-navbar, nav.navbar, .navbar, header.site-header { display:none!important; }
@@ -98,7 +106,14 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
 
     _ctrl = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(AppColors.bg);
+      ..setBackgroundColor(AppColors.bg)
+      // UA marker: Angular reads this in AppComponent to skip rendering
+      // Kori (Three.js + worker) and the screenshots section — heavy stuff
+      // we don't need when we're already inside the native app.
+      ..setUserAgent(
+        'Mozilla/5.0 (Linux; Android) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) PortfolioAdminFlutter/1.0 Mobile Safari/537.36',
+      );
 
     // Android platform settings applied before first load so they take effect
     // from the very first paint — not retroactively after the page loads.
