@@ -8,6 +8,7 @@ import '../services/portfolio_service.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
 import 'visits_screen.dart';
+import 'kori_config_screen.dart';
 
 // ── Cached text styles (created once, reused everywhere) ─────────────────────
 // GoogleFonts constructs a new object on every call if not cached.
@@ -384,6 +385,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               );
                             },
                           ).animate().fadeIn(delay: 440.ms).slideX(begin: -.04),
+
+                          const SizedBox(height: 10),
+
+                          _NavTile(
+                            icon:     Icons.auto_awesome_rounded,
+                            label:    'Kori',
+                            subtitle: 'Edit her prompt, personality, and tuning live',
+                            color:    const Color(0xFFF4934A), // paw orange
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const KoriConfigScreen()),
+                              );
+                            },
+                          ).animate().fadeIn(delay: 470.ms).slideX(begin: -.04),
 
                           const SizedBox(height: 28),
 

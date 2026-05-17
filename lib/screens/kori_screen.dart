@@ -31,6 +31,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/chat_store.dart';
+import '../services/kori_config_service.dart';
 import '../services/portfolio_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/kori_cat.dart';
@@ -157,6 +158,12 @@ class _KoriScreenState extends State<KoriScreen> {
   StreamSubscription<PortfolioSettings>? _settingsSub;
   PortfolioSettings? _portfolioSettings;
 
+  // Kori's persona, knobs, and feature toggles — fully driven by the admin's
+  // /portfolio/kori document so a change in the dashboard reflects on the
+  // next message without any redeploy.
+  StreamSubscription<KoriConfig>? _configSub;
+  KoriConfig _koriConfig = const KoriConfig();
+
   // Key resolution mirrors the Angular agent.service.ts pattern: try a local
   // user-provided override first (settings sheet), then fall back to the key
   // shipped via Firebase Remote Config (key name `openrouter_api_key`).
@@ -192,6 +199,12 @@ class _KoriScreenState extends State<KoriScreen> {
     _settingsSub = PortfolioService().stream().listen((s) {
       _portfolioSettings = s;
     });
+    // Same pattern for the Kori-specific config — persona, knobs, toggles.
+    // Don't setState on every change; the next message will pick up the
+    // fresh values, and the screen UI itself doesn't care.
+    _configSub = KoriConfigService().stream().listen((c) {
+      _koriConfig = c;
+    });
   }
 
   @override
@@ -199,6 +212,7 @@ class _KoriScreenState extends State<KoriScreen> {
     _streamSub?.cancel();
     _storeSub?.cancel();
     _settingsSub?.cancel();
+    _configSub?.cancel();
     _httpClient?.close();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -303,14 +317,18 @@ class _KoriScreenState extends State<KoriScreen> {
     }
   }
 
-  /// Builds the runtime system prompt: the static CV-grounded text plus a
-  /// dynamic block reflecting the live portfolio settings (availability,
-  /// contact form open/closed, current featured banner). Visitors care a lot
-  /// about "is he available" - Kori should answer it correctly without us
-  /// having to redeploy when the admin flips the toggle.
+  /// Composes the system prompt: persona + knobs from /portfolio/kori
+  /// (KoriConfig), plus a live status block from /portfolio/settings
+  /// (availability, contact form). Both Firestore docs are streamed in, so
+  /// admin edits on the Dashboard reflect on the next message with no
+  /// redeploy and no client refresh.
   String _buildSystemPrompt() {
     final s = _portfolioSettings;
-    final lines = <String>[_kSystemPrompt, '', 'CURRENT STATUS (live, can change at any time)'];
+    final lines = <String>[
+      _koriConfig.composePrompt(),
+      '',
+      'CURRENT STATUS (live, can change at any time)',
+    ];
     if (s == null) {
       lines.add('Status: unknown right now — point the visitor at the contact form to get a direct reply.');
     } else {
@@ -362,21 +380,25 @@ class _KoriScreenState extends State<KoriScreen> {
       // value`. Use a plain hyphen.
       'X-Title':        'Portfolio Admin - Kori',
     });
+    // Effective settings: admin's KoriConfig overrides the client defaults
+    // where it specifies values. modelOverride is per-message so a stale
+    // local _model can't override a freshly-set admin model.
+    final effectiveModel = _koriConfig.modelOverride.trim().isNotEmpty
+        ? _koriConfig.modelOverride.trim()
+        : _model;
     req.body = jsonEncode({
-      'model':    _model,
-      'stream':   true,
-      'messages': [
+      'model':       effectiveModel,
+      'stream':      true,
+      'messages':    [
         {'role': 'system', 'content': _buildSystemPrompt()},
         ...history,
       ],
-      // Agentic web grounding — OpenRouter runs a web search if the model
-      // decides the question needs one, and injects the top results into
-      // context with citations. ~$0.004 per call when triggered, free
-      // otherwise. Kori cites inline as markdown links per the prompt.
-      'plugins':  [
-        {'id': 'web', 'max_results': 3},
-      ],
-      'max_tokens': 350,
+      'temperature': _koriConfig.temperature,
+      'max_tokens':  _koriConfig.maxTokens,
+      // Web grounding only attached when the admin has the toggle on. Off-by-
+      // default would still produce a working reply, just no inline citations.
+      if (_koriConfig.webSearch)
+        'plugins': const [{'id': 'web', 'max_results': 3}],
     });
 
     final res = await _httpClient!.send(req);
