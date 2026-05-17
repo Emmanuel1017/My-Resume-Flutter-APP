@@ -7,6 +7,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../services/portfolio_service.dart';
 import '../services/fcm_service.dart';
 import '../theme/app_theme.dart';
+import 'visits_screen.dart';
 
 // ── Cached text styles (created once, reused everywhere) ─────────────────────
 // GoogleFonts constructs a new object on every call if not cached.
@@ -362,6 +363,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               .animate()
                               .fadeIn(duration: 250.ms)
                               .scale(begin: const Offset(.92, .92)),
+
+                          const SizedBox(height: 28),
+
+                          // ── Insights — links to the dedicated Visits page ─
+                          _SectionHeader(
+                            icon: Icons.insights_rounded, label: 'Insights')
+                              .animate().fadeIn(delay: 410.ms),
+                          const SizedBox(height: 14),
+
+                          _NavTile(
+                            icon:     Icons.public_rounded,
+                            label:    'Visits',
+                            subtitle: 'Live IPs, locations, devices & sources',
+                            color:    AppColors.accent,
+                            onTap: () {
+                              HapticFeedback.selectionClick();
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const VisitsScreen()),
+                              );
+                            },
+                          ).animate().fadeIn(delay: 440.ms).slideX(begin: -.04),
 
                           const SizedBox(height: 28),
 
@@ -931,4 +953,63 @@ class _LivePreview extends StatelessWidget {
       ),
     ]),
   );
+}
+
+// ─── Tappable nav tile (pushes a new route) ──────────────────────────────────
+class _NavTile extends StatelessWidget {
+  final IconData     icon;
+  final String       label;
+  final String       subtitle;
+  final Color        color;
+  final VoidCallback onTap;
+  const _NavTile({
+    required this.icon,
+    required this.label,
+    required this.subtitle,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          padding:    const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color:        AppColors.surface.withOpacity(.7),
+            borderRadius: BorderRadius.circular(16),
+            border:       Border.all(color: AppColors.border),
+          ),
+          child: Row(children: [
+            Container(
+              width: 44, height: 44,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withOpacity(.14),
+                border: Border.all(color: color.withOpacity(.4)),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 14, fontWeight: FontWeight.w800,
+                        color: AppColors.textHigh)),
+                  const SizedBox(height: 2),
+                  Text(subtitle,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 11.5, color: AppColors.textMid)),
+                ],
+              ),
+            ),
+            const Icon(Icons.chevron_right_rounded,
+                color: AppColors.textLow, size: 22),
+          ]),
+        ),
+      );
 }

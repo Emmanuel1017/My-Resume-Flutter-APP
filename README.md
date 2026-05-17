@@ -4,10 +4,12 @@
 
 The Android companion for [my portfolio site](https://emmanuel1017.github.io/Angular-Resume/).
 
-[![Download APK](https://img.shields.io/badge/Download-APK%20v1.0.0-F4934A?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk)
+[![Android APK](https://img.shields.io/badge/Android-APK-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin.apk)
+[![Windows](https://img.shields.io/badge/Windows-x64-0078D6?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin-windows-x64.zip)
+[![Linux](https://img.shields.io/badge/Linux-x64-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/Emmanuel1017/My-Resume-Flutter-APP/releases/latest/download/portfolio-admin-linux-x64.tar.gz)
+[![iOS](https://img.shields.io/badge/iOS-build%20locally-000000?style=for-the-badge&logo=apple&logoColor=white)](#deploy)
 [![Flutter](https://img.shields.io/badge/Flutter-3.0%2B-02569B?style=for-the-badge&logo=flutter&logoColor=white)](https://flutter.dev)
 [![Firebase](https://img.shields.io/badge/Firebase-FCM%20%C2%B7%20Firestore%20%C2%B7%20Auth-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
-[![Renderer](https://img.shields.io/badge/Renderer-Impeller%20%2F%20Vulkan-7CB9E8?style=for-the-badge)](https://docs.flutter.dev/perf/impeller)
 
 </div>
 
@@ -302,6 +304,57 @@ flutter run -d <device-id> --release                         # release build
 flutter build apk --release
 adb install -r build/app/outputs/flutter-apk/app-release.apk
 ```
+
+---
+
+## Visits
+
+There's a `/visits` collection that gets one append per browser session (Angular) or one per cold start (Flutter). The append captures everything we can reasonably pull without a third-party tracker: the IP and what `ipapi.co` returns for it (city, country, ISP, ASN, lat/long, timezone), the user agent, screen + viewport size, language, referrer, connection type, and which surface fired it (`web`, `flutter-admin`, `flutter-guest`). The Admin Console has an Insights -> Visits card that pushes into a full screen showing every row with summary metrics (Today / 7d / 30d / All-time / unique IPs / top country / top city) and an expandable detail panel per visit.
+
+Privacy posture: IPs land in Firestore and stay there. Rules let anyone create a visit row but only signed-in admins read them. No third-party trackers, no cookies, no Analytics PII push.
+
+---
+
+## Deploy
+
+One command from the repo root builds an Android APK + a Windows zip (on Windows hosts) or Linux tarball (on Linux hosts), then uploads everything to a new GitHub Release on `Emmanuel1017/My-Resume-Flutter-APP`:
+
+```bash
+export GITHUB_TOKEN=ghp_...      # PAT with `repo` scope
+dart run tool/deploy.dart        # auto-bumps the patch of the latest tag
+```
+
+Flags:
+
+```text
+--tag v1.2.3       force a specific tag
+--android-only     skip desktop builds
+--no-upload        build artifacts but don't push to GitHub
+--notes "..."      release body
+```
+
+The script also handles the asset-already-exists 422 by deleting and re-uploading.
+
+### Per-platform
+
+```bash
+flutter build apk --release        # Android
+flutter build windows --release    # Windows  (needs Visual Studio C++ workload)
+flutter build linux   --release    # Linux    (needs GTK + Clang)
+flutter build macos   --release    # macOS    (needs Xcode)
+flutter build ipa     --release    # iOS      (needs Xcode + Apple Developer)
+```
+
+iOS deliberately can't be cross-built from Windows or Linux. Run the iOS build on a Mac with `flutter build ipa --release`, sign with your Apple Developer team in Xcode, then drag the `.ipa` onto the v1.x release manually or `gh release upload v1.x ./build/ios/ipa/portfolio-admin.ipa`.
+
+### Firestore rules + Cloud Function
+
+```bash
+firebase deploy --only firestore:rules
+firebase deploy --only functions:notifyAdminsOnNewContact
+```
+
+Both ship the rules in `firestore.rules` (visits/admin_tokens/contacts/settings) and the FCM fan-out function. Blaze plan required for the function; rules are free.
 
 ---
 

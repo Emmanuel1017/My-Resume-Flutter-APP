@@ -58,6 +58,16 @@ class PortfolioService {
       .collection('portfolio')
       .doc('settings');
 
+  // Session-once gate for the auto-on side effect. HomeScreen + GuestHomeScreen
+  // both used to call _triggerAutoOn() in their initState; with the if-tab tab
+  // memory model that re-fires every time the user comes back to the app, and
+  // every write echoed back through every listener — including the admin's own
+  // dashboard, which would visibly flicker the "Available for Work" toggle. We
+  // now keep one static flag for the lifetime of the Dart isolate so the
+  // side-effect runs at most once per cold start, mirroring Angular's
+  // `autoOnFired` gate in PortfolioSettingsService.
+  static bool _autoOnFired = false;
+
   Stream<PortfolioSettings> stream() => _doc.snapshots().map(
     (s) => s.exists
         ? PortfolioSettings.fromMap(s.data()!)
@@ -69,4 +79,19 @@ class PortfolioService {
 
   Future<void> toggle(String field, bool value) =>
       _doc.set({field: value}, SetOptions(merge: true));
+
+  /// One-shot per app process: if `auto_on` is enabled AND the owner is
+  /// currently marked unavailable, flip them to available. Returning early on
+  /// "already true" prevents a redundant write that would otherwise fan out
+  /// through every listener (and clobber a recent manual toggle-off).
+  Future<void> maybeFireAutoOn() async {
+    if (_autoOnFired) return;
+    _autoOnFired = true;
+    try {
+      final s = await stream().first;
+      if (s.autoOn && !s.availableForWork) {
+        await toggle('available_for_work', true);
+      }
+    } catch (_) {/* offline / no doc yet — fine to skip */}
+  }
 }

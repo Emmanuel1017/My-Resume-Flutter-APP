@@ -1,0 +1,41 @@
+rules_version = '2';
+
+// Firestore security rules for the portfolio + admin app.
+// Deploy with:  firebase deploy --only firestore:rules
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Public-readable site settings; only signed-in admins can write.
+    match /portfolio/settings {
+      allow read;
+      allow write: if request.auth != null;
+    }
+
+    // Admin bootstrap doc — tracks whether the first admin has been created.
+    match /portfolio/meta {
+      allow read, write: if request.auth != null;
+    }
+
+    // Contact form drop-box. Anyone can submit; only admins can read/manage.
+    match /contacts/{id} {
+      allow create;
+      allow read, update, delete: if request.auth != null;
+    }
+
+    // FCM tokens for admin devices. Only the signed-in admin can write its own
+    // token; only signed-in admins (or the Cloud Function service account) can
+    // read the collection to fan out pushes.
+    match /admin_tokens/{token} {
+      allow read, write: if request.auth != null;
+    }
+
+    // Visit log — anyone can append a row from the public site or the Flutter
+    // app; only admins can read or aggregate. We deliberately do not allow
+    // update or delete from the client side: append-only audit log.
+    match /visits/{id} {
+      allow create;
+      allow read:           if request.auth != null;
+      allow update, delete: if false;
+    }
+  }
+}

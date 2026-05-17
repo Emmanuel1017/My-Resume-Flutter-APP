@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
 import '../services/portfolio_service.dart';
 import '../services/fcm_service.dart';
+import '../services/visit_tracker.dart';
 import '../main.dart' show pendingHomeTab;
 import '../widgets/marquee_label.dart';
 import 'portfolio_screen.dart';
@@ -50,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
       onOpen: () => mounted ? setState(() => _tab = 4) : null,
     );
     FcmService.instance.ensureTokenSaved();
+    VisitTracker.track(source: 'flutter-admin');
     // Reactively listen for taps while we're already on HomeScreen.
     pendingHomeTab.addListener(_onPendingTabChange);
   }
@@ -68,10 +70,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.dispose();
   }
 
-  Future<void> _triggerAutoOn() async {
-    final s = await PortfolioService().stream().first;
-    if (s.autoOn) await PortfolioService().toggle('available_for_work', true);
-  }
+  Future<void> _triggerAutoOn() => PortfolioService().maybeFireAutoOn();
 
   void _select(int i) {
     if (_tab == i) return; // guard: no setState if already on this tab
