@@ -12,11 +12,20 @@
 //         • Background   → system tray (Android default handler)
 //         • Terminated   → onMessageOpenedApp launches and routes to Messages
 //
-// Token persistence: we write the FCM token to /admin_tokens/{token} on every
-// signed-in start AND on onTokenRefresh. Function reads the whole collection
-// before sending so token churn is handled implicitly.
+// Init split:
+//   - `init()` runs once from main.dart BEFORE auth: registers the background
+//     handler, plumbs the foreground stream, creates the channel.
+//   - An auth-state listener inside `init()` watches FirebaseAuth and persists
+//     the FCM token to /admin_tokens/{token} every time a user signs in (or
+//     deletes it on sign-out). This is the part that used to silently never
+//     run — `init()` was called from main.dart before auth, so currentUser was
+//     null and the early-return on `_persistCurrentToken()` left the token
+//     collection empty forever. HomeScreen could re-call `init()` after login
+//     but `_initialized` short-circuited that call too.
+//   - Token persistence is now driven by the auth stream so it cannot miss.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -44,12 +53,12 @@ class FcmService {
 
   final _fln = FlutterLocalNotificationsPlugin();
   bool _initialized = false;
+  StreamSubscription<User?>? _authSub;
+  StreamSubscription<String>? _refreshSub;
 
   // Android notification channel — high importance so the heads-up banner
   // appears even on Do-Not-Disturb-Priority devices. Colored with the app's
   // primary accent so the banner reads as part of the app's visual language.
-  // Cannot be `const` because AndroidNotificationChannel's `ledColor` field is
-  // a non-const-constructible `Color`. `final` static is equivalent for use.
   static final _androidChannel = AndroidNotificationChannel(
     'portfolio_contacts',
     'New contact messages',
@@ -66,9 +75,11 @@ class FcmService {
   void Function()? onOpenMessages;
 
   Future<void> init({void Function()? onOpen}) async {
+    // Always refresh the open-callback even on subsequent calls so the latest
+    // HomeScreen state is used for routing.
+    onOpenMessages = onOpen ?? onOpenMessages;
     if (_initialized) return;
-    _initialized   = true;
-    onOpenMessages = onOpen;
+    _initialized = true;
 
     // 1. Background isolate handler — must be registered before any other FCM
     //    call so the OS knows where to dispatch wake-ups.
@@ -89,72 +100,69 @@ class FcmService {
           ?.createNotificationChannel(_androidChannel);
     }
 
-    // 3. Permission — iOS prompts, Android 13+ also requires runtime request.
-    await FirebaseMessaging.instance.requestPermission(
+    // 3. Permission — iOS prompts, Android 13+ POST_NOTIFICATIONS prompt is
+    //    also requested by FCM under the hood. We log the response so a
+    //    silently-denied permission shows up in logcat.
+    final settings = await FirebaseMessaging.instance.requestPermission(
       alert: true, badge: true, sound: true,
     );
+    if (kDebugMode) {
+      debugPrint('[FCM] permission: ${settings.authorizationStatus}');
+    }
 
-    // 4. Foreground stream — paint a local notification ourselves.
+    // 4. Streams — register before any potential message arrives.
     FirebaseMessaging.onMessage.listen(_handleForeground);
-
-    // 5. Tapped-while-in-background stream — route to Messages.
     FirebaseMessaging.onMessageOpenedApp.listen((_) => onOpenMessages?.call());
 
-    // 6. Cold-start tap — if the user tapped a notification that launched the
-    //    app from terminated, FirebaseMessaging.getInitialMessage() returns it.
+    // 5. Cold-start tap.
     final initial = await FirebaseMessaging.instance.getInitialMessage();
     if (initial != null) {
-      // Defer one frame so the navigator is ready.
       Future.microtask(() => onOpenMessages?.call());
     }
 
-    // 7. Token persistence — current token + future refreshes.
-    await _persistCurrentToken();
-    FirebaseMessaging.instance.onTokenRefresh.listen(_persistToken);
+    // 6. Auth-stream driven token persistence. Fires immediately with the
+    //    current user (or null), then again on every sign-in / sign-out.
+    //    This replaces the previous "best-effort once at init" pattern that
+    //    raced auth and silently dropped the token on cold-start.
+    _authSub = FirebaseAuth.instance.authStateChanges().listen((user) async {
+      if (user == null) {
+        // Don't aggressively delete here — `clearTokenOnSignOut()` does an
+        // explicit teardown when the user actually taps Sign out. Auth-state
+        // null also fires on app launch before the cached session restores,
+        // so deleting would race that restore.
+        return;
+      }
+      await _persistTokenForUser(user);
+    });
+
+    // 7. Token rotation — Firebase rotates tokens periodically. Save the new
+    //    one whenever it arrives.
+    _refreshSub = FirebaseMessaging.instance.onTokenRefresh.listen((token) async {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) await _writeToken(token, user);
+    });
   }
 
-  void _handleForeground(RemoteMessage m) {
-    final n = m.notification;
-    if (n == null) return;
-    _fln.show(
-      n.hashCode,
-      n.title ?? 'New message',
-      n.body  ?? '',
-      NotificationDetails(
-        android: AndroidNotificationDetails(
-          _androidChannel.id,
-          _androidChannel.name,
-          channelDescription: _androidChannel.description,
-          importance:  Importance.high,
-          priority:    Priority.high,
-          color:       const Color.fromARGB(255, 168, 232, 122),
-          colorized:   true,
-          icon:        '@mipmap/ic_launcher',
-          // Pull the sender name out of the data payload if the function set it,
-          // so the heads-up reads "Jane Doe — Subject" not just "New message".
-          styleInformation: BigTextStyleInformation(
-            n.body ?? '',
-            contentTitle: n.title,
-            summaryText:  m.data['email'] as String?,
-          ),
-        ),
-        iOS: const DarwinNotificationDetails(presentBanner: true, presentSound: true),
-      ),
-    );
-  }
-
-  // Only signed-in admin devices persist their token. Guests get no push.
-  Future<void> _persistCurrentToken() async {
+  /// Re-runs token persistence for the current user. Safe to call any number
+  /// of times — `set` with `merge: true` is idempotent.
+  Future<void> ensureTokenSaved() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
-    final token = await FirebaseMessaging.instance.getToken();
-    if (token == null) return;
-    await _persistToken(token);
+    await _persistTokenForUser(user);
   }
 
-  Future<void> _persistToken(String token) async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return; // guest — skip
+  Future<void> _persistTokenForUser(User user) async {
+    try {
+      final token = await FirebaseMessaging.instance.getToken();
+      if (kDebugMode) debugPrint('[FCM] token (first 12) = ${token?.substring(0, 12)}…');
+      if (token == null) return;
+      await _writeToken(token, user);
+    } catch (e) {
+      if (kDebugMode) debugPrint('[FCM] getToken failed: $e');
+    }
+  }
+
+  Future<void> _writeToken(String token, User user) async {
     try {
       await FirebaseFirestore.instance
           .collection('admin_tokens')
@@ -165,9 +173,52 @@ class FcmService {
         'platform':  Platform.isIOS ? 'ios' : 'android',
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+      if (kDebugMode) debugPrint('[FCM] token saved for ${user.email}');
     } catch (e) {
-      if (kDebugMode) debugPrint('[FCM] token persist failed: $e');
+      if (kDebugMode) debugPrint('[FCM] token write failed: $e');
     }
+  }
+
+  void _handleForeground(RemoteMessage m) {
+    if (kDebugMode) {
+      debugPrint('[FCM fg] ${m.messageId} '
+          'notif=${m.notification?.title} data=${m.data}');
+    }
+    // Many backends send data-only messages on Android to keep delivery
+    // priority high. Fall back to the data payload if there's no `notification`.
+    final title = m.notification?.title
+        ?? (m.data['title'] as String?)
+        ?? (m.data['name'] != null ? 'Message from ${m.data['name']}' : null)
+        ?? 'New contact message';
+    final body = m.notification?.body
+        ?? (m.data['body'] as String?)
+        ?? (m.data['message'] as String?)
+        ?? (m.data['email'] as String?)
+        ?? 'Tap to open your inbox';
+
+    _fln.show(
+      m.hashCode,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _androidChannel.id,
+          _androidChannel.name,
+          channelDescription: _androidChannel.description,
+          importance:  Importance.high,
+          priority:    Priority.high,
+          color:       const Color.fromARGB(255, 168, 232, 122),
+          colorized:   true,
+          icon:        '@mipmap/ic_launcher',
+          styleInformation: BigTextStyleInformation(
+            body,
+            contentTitle: title,
+            summaryText:  m.data['email'] as String?,
+          ),
+        ),
+        iOS: const DarwinNotificationDetails(presentBanner: true, presentSound: true),
+      ),
+    );
   }
 
   /// Call on logout so the device stops receiving pushes.

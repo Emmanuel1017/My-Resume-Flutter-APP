@@ -42,10 +42,14 @@ class _HomeScreenState extends State<HomeScreen> {
       _tab = requested.clamp(0, 4);
       pendingHomeTab.value = null;
     }
-    // Persist FCM token now that the user is verified signed-in.
+    // Update the tap-target callback (already-initialised init() will only
+    // refresh `onOpenMessages`) and explicitly persist the FCM token now
+    // that we know the user is signed in — covers the case where init
+    // fired in main.dart before auth restored.
     FcmService.instance.init(
       onOpen: () => mounted ? setState(() => _tab = 4) : null,
     );
+    FcmService.instance.ensureTokenSaved();
     // Reactively listen for taps while we're already on HomeScreen.
     pendingHomeTab.addListener(_onPendingTabChange);
   }
