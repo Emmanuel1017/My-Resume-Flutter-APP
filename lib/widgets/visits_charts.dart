@@ -36,10 +36,13 @@ class VisitsCharts extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Vertical stack — each chart gets the full card width. Side-by-side
+    // crammed the donut legend and the country names into ~150 px columns
+    // on phones and the text spilled past the card border.
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _ChartCard(
             title: 'Last 14 days',
@@ -50,31 +53,23 @@ class VisitsCharts extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: _ChartCard(
-                  title: 'Source',
-                  subtitle: 'Where the visit fired',
-                  child: SizedBox(
-                    height: 180,
-                    child: _SourceDonut(docs: docs),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _ChartCard(
-                  title: 'Top countries',
-                  subtitle: 'By visit count',
-                  child: SizedBox(
-                    height: 180,
-                    child: _CountryBar(docs: docs),
-                  ),
-                ),
-              ),
-            ],
+          _ChartCard(
+            title: 'Source',
+            subtitle: 'Where each visit fired',
+            child: SizedBox(
+              height: 150,
+              child: _SourceDonut(docs: docs),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _ChartCard(
+            title: 'Top countries',
+            subtitle: 'By visit count',
+            child: SizedBox(
+              // Height scales to the actual number of rows (max 5).
+              height: 22.0 * 5 + 8,
+              child: _CountryBar(docs: docs),
+            ),
           ),
         ],
       ),
@@ -100,16 +95,26 @@ class _ChartCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(children: [
-              Text(title,
-                  style: GoogleFonts.montserrat(
-                    fontSize: 13, fontWeight: FontWeight.w800,
-                    color: AppColors.textHigh)),
-              const SizedBox(width: 8),
-              Text(subtitle,
-                  style: GoogleFonts.montserrat(
-                    fontSize: 10.5, color: AppColors.textMid)),
-            ]),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.baseline,
+              textBaseline: TextBaseline.alphabetic,
+              children: [
+                Text(title,
+                    style: GoogleFonts.montserrat(
+                      fontSize: 13, fontWeight: FontWeight.w800,
+                      color: AppColors.textHigh)),
+                const SizedBox(width: 8),
+                // Flexible + ellipsis so a long subtitle on a narrow card
+                // truncates instead of pushing past the card edge.
+                Flexible(
+                  child: Text(subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 10.5, color: AppColors.textMid)),
+                ),
+              ],
+            ),
             const SizedBox(height: 10),
             child,
           ],
@@ -160,11 +165,17 @@ class _DailyBarChart extends StatelessWidget {
           leftTitles: AxisTitles(
             sideTitles: SideTitles(
               showTitles: true,
-              reservedSize: 26,
+              // 34 px holds up to 4-digit counts without clipping or pushing
+              // the bars off-screen on the right.
+              reservedSize: 34,
               interval: (maxY / 4).clamp(1, double.infinity).toDouble(),
-              getTitlesWidget: (v, _) => Text(v.toInt().toString(),
-                  style: GoogleFonts.montserrat(
-                    fontSize: 9, color: AppColors.textLow)),
+              getTitlesWidget: (v, _) => Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Text(v.toInt().toString(),
+                    textAlign: TextAlign.right,
+                    style: GoogleFonts.montserrat(
+                      fontSize: 9, color: AppColors.textLow)),
+              ),
             ),
           ),
           bottomTitles: AxisTitles(
@@ -262,7 +273,10 @@ class _SourceDonut extends StatelessWidget {
     final entries = counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
 
     return Row(children: [
-      Expanded(
+      // Pie gets a fixed slot; the legend takes the rest. Flexible on both
+      // would let either side flex into a 0-width state during layout.
+      SizedBox(
+        width: 130,
         child: PieChart(
           PieChartData(
             sectionsSpace: 2,
@@ -280,7 +294,7 @@ class _SourceDonut extends StatelessWidget {
           ),
         ),
       ),
-      const SizedBox(width: 6),
+      const SizedBox(width: 12),
       Expanded(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -291,25 +305,32 @@ class _SourceDonut extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 3),
                 child: Row(children: [
                   Container(
-                    width: 8, height: 8,
+                    width: 9, height: 9,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle, color: colorFor(e.key))),
-                  const SizedBox(width: 6),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(labelFor(e.key),
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
                         style: GoogleFonts.montserrat(
-                          fontSize: 11, fontWeight: FontWeight.w700,
+                          fontSize: 12, fontWeight: FontWeight.w700,
                           color: AppColors.textHigh)),
                   ),
+                  const SizedBox(width: 6),
                   Text('${e.value}',
                       style: GoogleFonts.montserrat(
-                        fontSize: 11, color: AppColors.textMid)),
+                        fontSize: 12, color: AppColors.textMid,
+                        fontWeight: FontWeight.w700)),
                 ]),
               ),
-            const SizedBox(height: 4),
-            Text('$total total',
-                style: GoogleFonts.montserrat(
-                  fontSize: 10, color: AppColors.textLow)),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.only(left: 17),
+              child: Text('$total total',
+                  style: GoogleFonts.montserrat(
+                    fontSize: 10.5, color: AppColors.textLow)),
+            ),
           ],
         ),
       ),
@@ -356,19 +377,25 @@ class _CountryBar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 3),
             child: Row(children: [
               SizedBox(
-                width: 18,
+                width: 22,
                 child: Text(flag(codes[top[i].key]),
                     style: const TextStyle(fontSize: 14))),
-              const SizedBox(width: 6),
-              SizedBox(
-                width: 60,
+              const SizedBox(width: 8),
+              // Flex 4 for the country name keeps it readable on full-width
+              // cards while still leaving generous room for the progress bar
+              // (flex 6) and the right-aligned count.
+              Expanded(
+                flex: 4,
                 child: Text(top[i].key,
                     overflow: TextOverflow.ellipsis,
+                    maxLines: 1,
                     style: GoogleFonts.montserrat(
-                      fontSize: 10.5, fontWeight: FontWeight.w700,
+                      fontSize: 11.5, fontWeight: FontWeight.w700,
                       color: AppColors.textHigh)),
               ),
+              const SizedBox(width: 10),
               Expanded(
+                flex: 6,
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(4),
                   child: LinearProgressIndicator(
@@ -380,13 +407,13 @@ class _CountryBar extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               SizedBox(
-                width: 20,
+                width: 28,
                 child: Text('${top[i].value}',
                     textAlign: TextAlign.right,
                     style: GoogleFonts.montserrat(
-                      fontSize: 10.5, color: AppColors.textMid,
+                      fontSize: 11, color: AppColors.textMid,
                       fontWeight: FontWeight.w700)),
               ),
             ]),
