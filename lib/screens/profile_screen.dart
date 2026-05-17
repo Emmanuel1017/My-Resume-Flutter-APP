@@ -163,12 +163,19 @@ class _ProfileScreenState extends State<ProfileScreen>
 
                   const SizedBox(height: 24),
 
-                  // Socials
-                  Row(
-                    children: _socials.map((s) => Padding(
-                      padding: const EdgeInsets.only(right: 10),
-                      child:   _SocialBtn(social: s),
-                    )).toList(),
+                  // Socials — horizontally scrollable. With CV added there are
+                  // now four chips, and on narrow phones (<360 dp) the last one
+                  // overflowed the right edge. ListView keeps each chip at its
+                  // intrinsic width and lets the row scroll instead of squishing.
+                  SizedBox(
+                    height: 38,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      physics:         const BouncingScrollPhysics(),
+                      itemCount:       _socials.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 10),
+                      itemBuilder:     (_, i) => _SocialBtn(social: _socials[i]),
+                    ),
                   ).animate().fadeIn(delay: 200.ms),
 
                   const SizedBox(height: 28),

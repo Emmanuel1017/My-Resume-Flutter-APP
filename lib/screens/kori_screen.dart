@@ -28,6 +28,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/chat_store.dart';
+import '../services/portfolio_service.dart';
 import '../theme/app_theme.dart';
 import '../widgets/kori_cat.dart';
 
@@ -140,6 +141,11 @@ class _KoriScreenState extends State<KoriScreen> {
       ChatStore.instance.activeChat?.messages ?? const [];
 
   StreamSubscription<void>? _storeSub;
+  // Snapshot of the portfolio settings — refreshed live from Firestore so the
+  // "currently available / not available" line in the system prompt always
+  // matches what's displayed on the public site.
+  StreamSubscription<PortfolioSettings>? _settingsSub;
+  PortfolioSettings? _portfolioSettings;
 
   // Key resolution mirrors the Angular agent.service.ts pattern: try a local
   // user-provided override first (settings sheet), then fall back to the key
@@ -171,12 +177,18 @@ class _KoriScreenState extends State<KoriScreen> {
         if (mounted) setState(() {});
       });
     });
+    // Keep the portfolio settings (availability, contact open, etc) in sync
+    // so the system prompt always reflects reality on the live site.
+    _settingsSub = PortfolioService().stream().listen((s) {
+      _portfolioSettings = s;
+    });
   }
 
   @override
   void dispose() {
     _streamSub?.cancel();
     _storeSub?.cancel();
+    _settingsSub?.cancel();
     _httpClient?.close();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -281,6 +293,30 @@ class _KoriScreenState extends State<KoriScreen> {
     }
   }
 
+  /// Builds the runtime system prompt: the static CV-grounded text plus a
+  /// dynamic block reflecting the live portfolio settings (availability,
+  /// contact form open/closed, current featured banner). Visitors care a lot
+  /// about "is he available" - Kori should answer it correctly without us
+  /// having to redeploy when the admin flips the toggle.
+  String _buildSystemPrompt() {
+    final s = _portfolioSettings;
+    final lines = <String>[_kSystemPrompt, '', 'CURRENT STATUS (live, can change at any time)'];
+    if (s == null) {
+      lines.add('Status: unknown right now — point the visitor at the contact form to get a direct reply.');
+    } else {
+      lines.add(s.availableForWork
+          ? 'Hiring availability: AVAILABLE FOR HIRE right now. He is open to new senior software engineering work — full-time, contract, or consulting. Encourage the visitor to use the Send Message tab or email koriremmanuel@rocketmail.com.'
+          : 'Hiring availability: NOT actively looking right now. He is heads-down on existing work. They can still send a message via the Send Message tab if it is interesting.');
+      lines.add(s.contactOpen
+          ? 'Contact form: open — Send Message tab works and goes straight to his inbox.'
+          : 'Contact form: temporarily closed — direct them to email koriremmanuel@rocketmail.com instead.');
+      if (s.featuredMessage.trim().isNotEmpty) {
+        lines.add('Pinned announcement on the site: "${s.featuredMessage.trim()}". Mention it if the visitor asks "what is he up to" or similar.');
+      }
+    }
+    return lines.join('\n');
+  }
+
   String _friendlyError(Object e) {
     final s = e.toString();
     if (s.contains('401') || s.contains('Unauthorized')) return 'Invalid API key — tap ⚙ to fix.';
@@ -320,7 +356,7 @@ class _KoriScreenState extends State<KoriScreen> {
       'model':    _model,
       'stream':   true,
       'messages': [
-        {'role': 'system', 'content': _kSystemPrompt},
+        {'role': 'system', 'content': _buildSystemPrompt()},
         ...history,
       ],
     });
