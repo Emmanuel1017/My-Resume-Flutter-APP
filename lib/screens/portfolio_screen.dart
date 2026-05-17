@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -19,13 +20,28 @@ const _injectCss = '''
     ::-webkit-scrollbar { display: none !important; }
     * { -webkit-tap-highlight-color: transparent; }
     app-navbar, nav.navbar, .navbar, header.site-header { display:none!important; }
-    body {
-      padding-top:0!important; margin-top:0!important;
-      overscroll-behavior:none;
-      touch-action: pan-y;
+
+    html {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+      /* Kill smooth-scroll — it fights Android's native momentum scrolling */
+      scroll-behavior: auto !important;
+      /* Native momentum scroll path */
+      -webkit-overflow-scrolling: touch;
     }
-    html { -webkit-text-size-adjust:100%; text-size-adjust:100%; }
-    section { scroll-margin-top:0!important; }
+
+    body {
+      padding-top: 0 !important;
+      margin-top: 0 !important;
+      overscroll-behavior: none;
+      touch-action: pan-y;
+      /* Promote the scroll container to its own GPU composite layer */
+      -webkit-transform: translateZ(0);
+      transform: translateZ(0);
+      backface-visibility: hidden;
+    }
+
+    section { scroll-margin-top: 0 !important; }
 
     /* Skip off-screen rendering — biggest win on low-end */
     app-about, app-skills, app-my-work, app-experience, app-contact {
@@ -44,11 +60,11 @@ const _injectCss = '''
       will-change: transform;
     }
 
-    /* Native fast scroll path */
-    html, body { -webkit-overflow-scrolling: touch; }
+    /* Decorative layers must not block touch events */
+    .card-overlay, .card-shine { pointer-events: none; }
 
-    /* Prevent layout shift from web fonts */
-    * { font-display: optional; }
+    /* Sub-pixel antialiasing for crisper text */
+    * { -webkit-font-smoothing: antialiased; }
   `;
   document.head.appendChild(s);
 })();
@@ -180,11 +196,17 @@ class _PortfolioScreenState extends State<PortfolioScreen> {
       backgroundColor: AppColors.bg,
       body: Stack(
         children: [
-          // WebViewWidget never rebuilds — it sits outside all ValueListenableBuilders
+          // WebViewWidget never rebuilds — it sits outside all ValueListenableBuilders.
+          // EagerGestureRecognizer makes the WebView claim touches immediately instead
+          // of waiting for Flutter's gesture arena, eliminating the ~80ms scroll lag.
           WebViewWidget(
             controller: _ctrl,
-            // Isolate the WebView from any ancestor repaints
             key: const ValueKey('portfolio-webview'),
+            gestureRecognizers: {
+              Factory<OneSequenceGestureRecognizer>(
+                () => EagerGestureRecognizer(),
+              ),
+            },
           ),
 
           // Top chrome: progress bar updates independently of WebView

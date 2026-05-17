@@ -21,6 +21,12 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <!-- Opt in to variable refresh rate scheduling (Android 11+).
+                 Combined with preferredDisplayModeId set in MainActivity this
+                 allows the OS to boost to 120 Hz while the app is in use. -->
+            <meta-data
+                android:name="android.allow_multiple_resumed_activities"
+                android:value="true"/>
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
