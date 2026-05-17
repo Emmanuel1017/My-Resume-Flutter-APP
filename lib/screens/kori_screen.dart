@@ -7,9 +7,13 @@
 // and replace it with this native screen, which talks to OpenRouter over HTTP
 // using a streamed SSE response so tokens appear as they arrive.
 //
-// Settings (API key, model) are persisted in shared_preferences. Conversation
-// is kept in-memory only — clears on tab teardown, matching the "release
-// everything on tab switch" memory model used by the rest of the app.
+// Conversations are persisted **locally** (no Firestore) through ChatStore,
+// which JSON-encodes the chat list into shared_preferences. Multiple chats,
+// switch between them, auto-title from the first user message, streaming
+// flushed to disk every ~600 ms so a crash mid-reply leaves the partial
+// answer intact. Same flow as ChatGPT/Claude/Gemini's per-conversation UX,
+// minus the cloud sync — text-only chat history is small enough that local
+// storage is the right answer for a personal portfolio companion app.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:async';
@@ -22,6 +26,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../services/chat_store.dart';
 import '../theme/app_theme.dart';
 import '../widgets/kori_cat.dart';
 
@@ -58,15 +63,6 @@ const _kSystemPrompt =
     "Reply in 1–2 short sentences, no markdown, max 55 words. Stay in character — enthusiastic, helpful cat. "
     "Occasionally use 🐾 or 😺 but not every message.";
 
-// ── Message model ────────────────────────────────────────────────────────────
-enum _Role { user, assistant }
-
-class _Msg {
-  final _Role role;
-  String text;
-  _Msg(this.role, this.text);
-}
-
 // ── Screen ───────────────────────────────────────────────────────────────────
 class KoriScreen extends StatefulWidget {
   const KoriScreen({super.key});
@@ -78,7 +74,13 @@ class KoriScreen extends StatefulWidget {
 class _KoriScreenState extends State<KoriScreen> {
   final _inputCtrl  = TextEditingController();
   final _scrollCtrl = ScrollController();
-  final List<_Msg> _messages = [];
+
+  // Live read of the active chat's messages — ChatStore owns the data, this
+  // screen is just a view. Mutations go through the store so they persist.
+  List<ChatMessage> get _messages =>
+      ChatStore.instance.activeChat?.messages ?? const [];
+
+  StreamSubscription<void>? _storeSub;
 
   // Key resolution mirrors the Angular agent.service.ts pattern: try a local
   // user-provided override first (settings sheet), then fall back to the key
@@ -98,11 +100,24 @@ class _KoriScreenState extends State<KoriScreen> {
   void initState() {
     super.initState();
     _loadSettings();
+    // Hydrate the persisted chat list, then subscribe so list-level mutations
+    // (new chat, switch chat, delete, rename) trigger a rebuild. Per-message
+    // streaming mutations bypass this stream — they call setState directly
+    // because we already own the ChatMessage object and the per-frame rebuild
+    // would be wasteful otherwise.
+    ChatStore.instance.load().then((_) {
+      if (!mounted) return;
+      setState(() {});
+      _storeSub = ChatStore.instance.changes.listen((_) {
+        if (mounted) setState(() {});
+      });
+    });
   }
 
   @override
   void dispose() {
     _streamSub?.cancel();
+    _storeSub?.cancel();
     _httpClient?.close();
     _inputCtrl.dispose();
     _scrollCtrl.dispose();
@@ -180,9 +195,13 @@ class _KoriScreenState extends State<KoriScreen> {
     }
 
     HapticFeedback.lightImpact();
+    // Persist both rows through the store. The user message is final; the
+    // assistant placeholder will fill in during streaming and gets force-
+    // flushed on `onDone`.
+    await ChatStore.instance.appendMessage(ChatRole.user, text);
+    await ChatStore.instance.appendMessage(ChatRole.assistant, '');
+    if (!mounted) return;
     setState(() {
-      _messages.add(_Msg(_Role.user,      text));
-      _messages.add(_Msg(_Role.assistant, '')); // placeholder for streamed reply
       _inputCtrl.clear();
       _streaming = true;
     });
@@ -193,9 +212,12 @@ class _KoriScreenState extends State<KoriScreen> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _messages.last.text = '⚠ ${_friendlyError(e)}';
+          if (_messages.isNotEmpty) {
+            _messages.last.text = '⚠ ${_friendlyError(e)}';
+          }
           _streaming = false;
         });
+        await ChatStore.instance.flushStreamingMessage(force: true);
       }
     }
   }
@@ -217,7 +239,7 @@ class _KoriScreenState extends State<KoriScreen> {
     final history = _messages
         .take(_messages.length - 1) // exclude empty placeholder
         .map((m) => {
-              'role':    m.role == _Role.user ? 'user' : 'assistant',
+              'role':    m.role == ChatRole.user ? 'user' : 'assistant',
               'content': m.text,
             })
         .toList();
@@ -268,13 +290,19 @@ class _KoriScreenState extends State<KoriScreen> {
             final obj   = jsonDecode(data) as Map<String, dynamic>;
             final delta = (obj['choices'] as List?)?[0]?['delta']?['content'] as String?;
             if (delta == null || delta.isEmpty) continue;
-            if (!mounted) return;
+            if (!mounted || _messages.isEmpty) return;
             setState(() => _messages.last.text += delta);
+            // Throttled-internally — disk flush at most every ~600 ms so a
+            // crash mid-stream still preserves the partial answer.
+            ChatStore.instance.flushStreamingMessage();
             _scrollToBottom();
           } catch (_) {/* keep streaming */}
         }
       },
-      onDone: () {
+      onDone: () async {
+        // Final write so the complete response is in storage before any UI
+        // exit path can run.
+        await ChatStore.instance.flushStreamingMessage(force: true);
         if (mounted) setState(() => _streaming = false);
         completer.complete();
       },
@@ -294,10 +322,36 @@ class _KoriScreenState extends State<KoriScreen> {
     if (mounted) setState(() => _streaming = false);
   }
 
-  void _clearChat() {
+  Future<void> _newChat() async {
     HapticFeedback.selectionClick();
     _stopStream();
-    setState(_messages.clear);
+    await ChatStore.instance.createChat();
+    _inputCtrl.clear();
+  }
+
+  void _openChatList() {
+    HapticFeedback.selectionClick();
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bg,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => _ChatListSheet(
+        onNew: () async {
+          Navigator.pop(context);
+          await _newChat();
+        },
+        onPick: (id) async {
+          Navigator.pop(context);
+          _stopStream();
+          await ChatStore.instance.selectChat(id);
+        },
+        onDelete: (id) => ChatStore.instance.deleteChat(id),
+        onRename: (id, title) => ChatStore.instance.renameChat(id, title),
+      ),
+    );
   }
 
   void _openSettings({bool missingKey = false}) {
@@ -339,9 +393,11 @@ class _KoriScreenState extends State<KoriScreen> {
           children: [
             _KoriHeader(
               streaming:   _streaming,
-              hasMessages: _messages.isNotEmpty,
+              chatTitle:   ChatStore.instance.activeChat?.title,
+              chatCount:   ChatStore.instance.chats.length,
+              onChats:     _openChatList,
+              onNew:       _newChat,
               onSettings:  () => _openSettings(),
-              onClear:     _clearChat,
             ),
             Expanded(
               child: _messages.isEmpty
@@ -356,7 +412,7 @@ class _KoriScreenState extends State<KoriScreen> {
                       itemBuilder: (_, i) {
                         final m       = _messages[i];
                         final isLast  = i == _messages.length - 1;
-                        final pending = _streaming && isLast && m.role == _Role.assistant && m.text.isEmpty;
+                        final pending = _streaming && isLast && m.role == ChatRole.assistant && m.text.isEmpty;
                         return _Bubble(message: m, thinking: pending);
                       },
                     ),
@@ -376,20 +432,27 @@ class _KoriScreenState extends State<KoriScreen> {
 
 // ─── Header ──────────────────────────────────────────────────────────────────
 class _KoriHeader extends StatelessWidget {
-  final bool streaming;
-  final bool hasMessages;
+  final bool         streaming;
+  final String?      chatTitle;
+  final int          chatCount;
+  final VoidCallback onChats;
+  final VoidCallback onNew;
   final VoidCallback onSettings;
-  final VoidCallback onClear;
 
   const _KoriHeader({
     required this.streaming,
-    required this.hasMessages,
+    required this.chatTitle,
+    required this.chatCount,
+    required this.onChats,
+    required this.onNew,
     required this.onSettings,
-    required this.onClear,
   });
 
   @override
   Widget build(BuildContext context) {
+    final subtitle = streaming
+        ? 'thinking…'
+        : (chatTitle ?? 'ready to chat');
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 12, 12),
       child: Row(children: [
@@ -416,15 +479,29 @@ class _KoriHeader extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 6),
-                Text(streaming ? 'thinking…' : 'ready to chat',
-                    style: GoogleFonts.montserrat(
-                      fontSize: 11.5, color: AppColors.textMid)),
+                // Current chat title sits where the status used to. Truncates
+                // gracefully — auto-titles can run long when the user opens
+                // with a sentence.
+                Flexible(
+                  child: Text(subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 11.5, color: AppColors.textMid)),
+                ),
               ]),
             ],
           ),
         ),
-        if (hasMessages)
-          _RoundBtn(icon: Icons.delete_sweep_outlined, onTap: onClear, tooltip: 'Clear chat'),
+        // Chats list — shows a badge when there's more than one persisted chat.
+        _RoundBtn(
+          icon: Icons.chat_bubble_outline_rounded,
+          onTap: onChats,
+          tooltip: 'Chats',
+          badge: chatCount > 1 ? chatCount : 0,
+        ),
+        const SizedBox(width: 6),
+        _RoundBtn(icon: Icons.add_rounded, onTap: onNew, tooltip: 'New chat'),
         const SizedBox(width: 6),
         _RoundBtn(icon: Icons.settings_rounded, onTap: onSettings, tooltip: 'Settings'),
       ]),
@@ -485,21 +562,50 @@ class _RoundBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
   final String tooltip;
-  const _RoundBtn({required this.icon, required this.onTap, required this.tooltip});
+  final int badge;
+  const _RoundBtn({
+    required this.icon,
+    required this.onTap,
+    required this.tooltip,
+    this.badge = 0,
+  });
 
   @override
   Widget build(BuildContext context) => Tooltip(
         message: tooltip,
         child: GestureDetector(
           onTap: onTap,
-          child: Container(
-            width: 38, height: 38,
-            decoration: BoxDecoration(
-              color:  AppColors.surface,
-              shape:  BoxShape.circle,
-              border: Border.all(color: AppColors.border),
-            ),
-            child: Icon(icon, color: AppColors.textMid, size: 17),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Container(
+                width: 38, height: 38,
+                decoration: BoxDecoration(
+                  color:  AppColors.surface,
+                  shape:  BoxShape.circle,
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Icon(icon, color: AppColors.textMid, size: 17),
+              ),
+              if (badge > 0)
+                Positioned(
+                  top: -3, right: -3,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color:        _kPaw,
+                      borderRadius: BorderRadius.circular(8),
+                      border:       Border.all(color: AppColors.bg, width: 1.5),
+                    ),
+                    child: Text(
+                      badge > 99 ? '99+' : '$badge',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 8.5, fontWeight: FontWeight.w800,
+                        color: Colors.white),
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       );
@@ -574,13 +680,13 @@ class _EmptyState extends StatelessWidget {
 
 // ─── Chat bubble ─────────────────────────────────────────────────────────────
 class _Bubble extends StatelessWidget {
-  final _Msg  message;
-  final bool  thinking;
+  final ChatMessage message;
+  final bool        thinking;
   const _Bubble({required this.message, required this.thinking});
 
   @override
   Widget build(BuildContext context) {
-    final isUser = message.role == _Role.user;
+    final isUser = message.role == ChatRole.user;
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -927,4 +1033,348 @@ class _SettingsSheetState extends State<_SettingsSheet> {
       ]),
     );
   }
+}
+
+// ─── Chat list bottom sheet ──────────────────────────────────────────────────
+// Bound directly to ChatStore.changes so deletes / renames refresh the list
+// without having to manually re-show the sheet.
+class _ChatListSheet extends StatefulWidget {
+  final VoidCallback              onNew;
+  final void Function(String id)  onPick;
+  final void Function(String id)  onDelete;
+  final void Function(String id, String title) onRename;
+  const _ChatListSheet({
+    required this.onNew,
+    required this.onPick,
+    required this.onDelete,
+    required this.onRename,
+  });
+
+  @override
+  State<_ChatListSheet> createState() => _ChatListSheetState();
+}
+
+class _ChatListSheetState extends State<_ChatListSheet> {
+  StreamSubscription<void>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = ChatStore.instance.changes.listen((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  String _relative(int ts) {
+    if (ts == 0) return '';
+    final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ts));
+    if (diff.inSeconds < 60)  return 'just now';
+    if (diff.inMinutes < 60)  return '${diff.inMinutes}m ago';
+    if (diff.inHours   < 24)  return '${diff.inHours}h ago';
+    if (diff.inDays    < 7)   return '${diff.inDays}d ago';
+    final dt = DateTime.fromMillisecondsSinceEpoch(ts);
+    return '${dt.day}/${dt.month}/${dt.year}';
+  }
+
+  Future<void> _confirmDelete(String id, String title) async {
+    HapticFeedback.lightImpact();
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('Delete chat?',
+            style: GoogleFonts.montserrat(
+              fontSize: 16, fontWeight: FontWeight.w800,
+              color: AppColors.textHigh)),
+        content: Text('"$title" will be removed from this device.',
+            style: GoogleFonts.montserrat(
+              fontSize: 13, color: AppColors.textMid, height: 1.4)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.montserrat(
+                  fontSize: 12, fontWeight: FontWeight.w700,
+                  color: AppColors.textMid)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text('Delete',
+                style: GoogleFonts.montserrat(
+                  fontSize: 12, fontWeight: FontWeight.w800,
+                  color: AppColors.danger)),
+          ),
+        ],
+      ),
+    );
+    if (ok == true) widget.onDelete(id);
+  }
+
+  Future<void> _promptRename(Chat chat) async {
+    HapticFeedback.lightImpact();
+    final ctrl = TextEditingController(text: chat.title);
+    final newTitle = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Text('Rename chat',
+            style: GoogleFonts.montserrat(
+              fontSize: 16, fontWeight: FontWeight.w800,
+              color: AppColors.textHigh)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 60,
+          style: GoogleFonts.montserrat(fontSize: 13, color: AppColors.textHigh),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancel',
+                style: GoogleFonts.montserrat(
+                  fontSize: 12, fontWeight: FontWeight.w700,
+                  color: AppColors.textMid)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text),
+            child: Text('Save',
+                style: GoogleFonts.montserrat(
+                  fontSize: 12, fontWeight: FontWeight.w800,
+                  color: _kPaw)),
+          ),
+        ],
+      ),
+    );
+    if (newTitle != null) widget.onRename(chat.id, newTitle);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chats   = ChatStore.instance.chats;
+    final active  = ChatStore.instance.activeId;
+    final bottom  = MediaQuery.of(context).viewInsets.bottom;
+    final maxH    = MediaQuery.of(context).size.height * 0.72;
+
+    return ConstrainedBox(
+      constraints: BoxConstraints(maxHeight: maxH),
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(20, 14, 20, 18 + bottom),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          // Drag handle
+          Container(
+            width: 40, height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.border,
+              borderRadius: BorderRadius.circular(2)),
+          ),
+          const SizedBox(height: 16),
+          Row(children: [
+            const _PawAvatar(size: 32),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Your chats',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 16, fontWeight: FontWeight.w900,
+                        color: AppColors.textHigh)),
+                  Text('${chats.length} on this device',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 11, color: AppColors.textMid)),
+                ],
+              ),
+            ),
+            GestureDetector(
+              onTap: widget.onNew,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(colors: [_kPaw, _kPawDark]),
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: [BoxShadow(color: _kPaw.withOpacity(.35), blurRadius: 12)],
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  const Icon(Icons.add_rounded, color: Colors.white, size: 16),
+                  const SizedBox(width: 4),
+                  Text('New',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 12, fontWeight: FontWeight.w800,
+                        color: Colors.white)),
+                ]),
+              ),
+            ),
+          ]),
+          const SizedBox(height: 14),
+          if (chats.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 36),
+              child: Text('No chats yet — start one!',
+                  style: GoogleFonts.montserrat(
+                    fontSize: 13, color: AppColors.textLow)),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: chats.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (_, i) {
+                  final c       = chats[i];
+                  final isActive = c.id == active;
+                  return _ChatRow(
+                    chat:      c,
+                    isActive:  isActive,
+                    when:      _relative(c.updatedAt),
+                    onTap:     () => widget.onPick(c.id),
+                    onRename:  () => _promptRename(c),
+                    onDelete:  () => _confirmDelete(c.id, c.title),
+                  );
+                },
+              ),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _ChatRow extends StatelessWidget {
+  final Chat   chat;
+  final bool   isActive;
+  final String when;
+  final VoidCallback onTap;
+  final VoidCallback onRename;
+  final VoidCallback onDelete;
+  const _ChatRow({
+    required this.chat,
+    required this.isActive,
+    required this.when,
+    required this.onTap,
+    required this.onRename,
+    required this.onDelete,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final lastMsg = chat.messages.isEmpty
+        ? 'No messages yet'
+        : chat.messages.last.text.trim();
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: isActive
+              ? _kPaw.withOpacity(.10)
+              : AppColors.surface.withOpacity(.6),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isActive
+                ? _kPaw.withOpacity(.45)
+                : AppColors.border,
+            width: isActive ? 1.4 : 1),
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Container(
+            width: 8, height: 8,
+            margin: const EdgeInsets.only(top: 6, right: 10),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: isActive ? _kPaw : AppColors.textLow.withOpacity(.4)),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                    child: Text(chat.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.montserrat(
+                          fontSize: 13,
+                          fontWeight: isActive ? FontWeight.w800 : FontWeight.w700,
+                          color: AppColors.textHigh)),
+                  ),
+                  if (when.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Text(when,
+                        style: GoogleFonts.montserrat(
+                          fontSize: 10, color: AppColors.textLow)),
+                  ],
+                ]),
+                const SizedBox(height: 3),
+                Text(lastMsg,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: GoogleFonts.montserrat(
+                      fontSize: 11.5, color: AppColors.textMid)),
+                const SizedBox(height: 6),
+                Row(children: [
+                  Text('${chat.messages.length} message${chat.messages.length == 1 ? '' : 's'}',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 10, color: AppColors.textLow,
+                        fontWeight: FontWeight.w600)),
+                  const Spacer(),
+                  _IconBtn(
+                    icon: Icons.edit_outlined,
+                    tooltip: 'Rename',
+                    onTap: onRename,
+                  ),
+                  const SizedBox(width: 6),
+                  _IconBtn(
+                    icon: Icons.delete_outline_rounded,
+                    tooltip: 'Delete',
+                    onTap: onDelete,
+                    danger: true,
+                  ),
+                ]),
+              ],
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
+class _IconBtn extends StatelessWidget {
+  final IconData    icon;
+  final String      tooltip;
+  final VoidCallback onTap;
+  final bool        danger;
+  const _IconBtn({
+    required this.icon, required this.tooltip, required this.onTap,
+    this.danger = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Tooltip(
+        message: tooltip,
+        child: GestureDetector(
+          onTap: onTap,
+          child: Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              color: (danger ? AppColors.danger : AppColors.textMid).withOpacity(.10),
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: (danger ? AppColors.danger : AppColors.textMid).withOpacity(.3)),
+            ),
+            child: Icon(icon,
+                size: 14,
+                color: danger ? AppColors.danger : AppColors.textMid),
+          ),
+        ),
+      );
 }
