@@ -235,8 +235,8 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       final wadBase64 = base64Encode(wadBytes);
       debugPrint('[DOOM] WAD Base64 length: ${wadBase64.length} characters');
 
-      // Read js-dos library files (v6.22)
-      debugPrint('[DOOM] Reading js-dos library files...');
+      // Verify js-dos library files are cached (HTML will load them via script tags)
+      debugPrint('[DOOM] Verifying js-dos library files are cached...');
       final jsDosPath = await _cacheService.getJsDosFilePath('js-dos.js');
       final wdosboxJsPath = await _cacheService.getJsDosFilePath('wdosbox.js');
 
@@ -244,11 +244,8 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
         throw Exception('js-dos library files not found in cache');
       }
 
-      final jsDosCode = await File(jsDosPath).readAsString();
-      debugPrint('[DOOM] js-dos.js loaded: ${jsDosCode.length} characters');
-
-      final wdosboxJsCode = await File(wdosboxJsPath).readAsString();
-      debugPrint('[DOOM] wdosbox.js loaded: ${wdosboxJsCode.length} characters');
+      debugPrint('[DOOM] js-dos.js cached at: $jsDosPath');
+      debugPrint('[DOOM] wdosbox.js cached at: $wdosboxJsPath');
 
       // Create controller first
       debugPrint('[DOOM] Creating WebViewController...');
@@ -272,29 +269,21 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
               debugPrint('[DOOM] HTML page loaded: $url');
               await Future.delayed(const Duration(milliseconds: 300));
 
-              debugPrint('[DOOM] Injecting js-dos v6.22 library and WAD data...');
+              debugPrint('[DOOM] Injecting WAD data...');
               try {
-                // Inject js-dos library code
-                await _controller?.runJavaScript(jsDosCode);
-                debugPrint('[DOOM] js-dos.js injected');
-
-                // Inject wdosbox.js code
-                await _controller?.runJavaScript(wdosboxJsCode);
-                debugPrint('[DOOM] wdosbox.js injected');
-
-                // Inject game data and start
+                // HTML loads js-dos via script tags, we just pass the WAD data
                 await _controller?.runJavaScript('''
                   console.log('[DOOM JS] Receiving game data from Flutter...');
                   window.gameTitle = "${game.title}";
                   window.wadData = "$wadBase64";
-                  console.log('[DOOM JS] Data received, starting game...');
+                  console.log('[DOOM JS] Data received, calling startDoom...');
                   if (typeof window.startDoom === 'function') {
                     window.startDoom();
                   } else {
                     console.error('[DOOM JS] startDoom function not found!');
                   }
                 ''');
-                debugPrint('[DOOM] Game data injected and startDoom called');
+                debugPrint('[DOOM] WAD data injected and startDoom called');
               } catch (e) {
                 debugPrint('[DOOM] JavaScript injection error: $e');
               }
