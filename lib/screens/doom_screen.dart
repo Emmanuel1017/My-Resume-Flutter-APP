@@ -333,6 +333,9 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
         console.log('[DOOM] typeof dosInstance:', typeof dosInstance);
         console.log('[DOOM] dosInstance.ready:', dosInstance.ready);
         console.log('[DOOM] typeof dosInstance.ready:', typeof dosInstance.ready);
+        console.log('[DOOM] dosInstance keys:', Object.keys(dosInstance));
+        console.log('[DOOM] dosInstance.then:', dosInstance.then);
+        console.log('[DOOM] typeof dosInstance.then:', typeof dosInstance.then);
 
         // Check if it's a promise (js-dos v7/v8 style)
         if (dosInstance && typeof dosInstance.then === 'function') {
