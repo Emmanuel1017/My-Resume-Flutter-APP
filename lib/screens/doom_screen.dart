@@ -235,8 +235,8 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       final wadBase64 = base64Encode(wadBytes);
       debugPrint('[DOOM] WAD Base64 length: ${wadBase64.length} characters');
 
-      // Verify js-dos library files are cached (HTML will load them via script tags)
-      debugPrint('[DOOM] Verifying js-dos library files are cached...');
+      // Read js-dos library files to inline in HTML
+      debugPrint('[DOOM] Reading js-dos library files...');
       final jsDosPath = await _cacheService.getJsDosFilePath('js-dos.js');
       final wdosboxJsPath = await _cacheService.getJsDosFilePath('wdosbox.js');
 
@@ -244,8 +244,11 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
         throw Exception('js-dos library files not found in cache');
       }
 
-      debugPrint('[DOOM] js-dos.js cached at: $jsDosPath');
-      debugPrint('[DOOM] wdosbox.js cached at: $wdosboxJsPath');
+      final jsDosCode = await File(jsDosPath).readAsString();
+      final wdosboxJsCode = await File(wdosboxJsPath).readAsString();
+
+      debugPrint('[DOOM] js-dos.js: ${jsDosCode.length} chars');
+      debugPrint('[DOOM] wdosbox.js: ${wdosboxJsCode.length} chars');
 
       // Create controller first
       debugPrint('[DOOM] Creating WebViewController...');
@@ -258,65 +261,121 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
         });
       }
 
+      // Create HTML with inline js-dos scripts
+      debugPrint('[DOOM] Creating HTML with inline scripts...');
+
+      final html = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>DOOM</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, canvas { width: 100%; height: 100%; margin: 0; padding: 0; }
+    body { background: #000; overflow: hidden; touch-action: none; }
+    canvas { display: block; user-select: none; }
+    .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff41; font-size: 1.1rem; padding: 2rem; z-index: 10; text-shadow: 0 0 10px #00ff41; }
+    .error { color: #c41e1e; }
+    .spinner { border: 4px solid #333; border-top: 4px solid #00ff41; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="loading" id="loading"><div class="spinner"></div><div>INITIALIZING...</div></div>
+  <canvas id="jsdos" style="display:none;"></canvas>
+
+  <script>
+    // Inline js-dos library
+    $jsDosCode
+  </script>
+
+  <script>
+    // Inline wdosbox
+    $wdosboxJsCode
+  </script>
+
+  <script>
+    const loading = document.getElementById('loading');
+    const canvas = document.getElementById('jsdos');
+
+    function updateLoading(msg, isError) {
+      loading.innerHTML = isError ? '<div class="error">' + msg + '</div>' : '<div class="spinner"></div><div>' + msg + '</div>';
+    }
+
+    function base64ToArrayBuffer(base64) {
+      const bin = atob(base64);
+      const len = bin.length;
+      const bytes = new Uint8Array(len);
+      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    console.log('[DOOM] typeof Dos:', typeof Dos);
+
+    if (typeof Dos !== 'function') {
+      updateLoading('ERROR: js-dos not loaded', true);
+    } else {
+      updateLoading('CONVERTING BUNDLE...');
+
+      const wadData = base64ToArrayBuffer("$wadBase64");
+      const blob = new Blob([wadData], { type: 'application/octet-stream' });
+      const blobUrl = URL.createObjectURL(blob);
+
+      console.log('[DOOM] Blob created, size:', blob.size);
+
+      updateLoading('INITIALIZING...');
+
+      Dos(canvas, {}).ready(function(fs, main) {
+        console.log('[DOOM] Ready!');
+        updateLoading('EXTRACTING...');
+
+        fs.extract(blobUrl).then(function() {
+          console.log('[DOOM] Extracted!');
+          updateLoading('STARTING ${game.title}...');
+
+          setTimeout(function() {
+            loading.style.display = 'none';
+            canvas.style.display = 'block';
+          }, 500);
+
+          main([]).then(function(ci) {
+            console.log('[DOOM] Started!');
+            window.ci = ci;
+          }).catch(function(err) {
+            console.error('[DOOM] Error:', err);
+            updateLoading('ERROR: ' + err.message, true);
+            loading.style.display = 'block';
+          });
+        }).catch(function(err) {
+          console.error('[DOOM] Extract error:', err);
+          updateLoading('ERROR: ' + err.message, true);
+        });
+      });
+    }
+  </script>
+</body>
+</html>
+''';
+
       // Configure controller
       debugPrint('[DOOM] Configuring WebViewController...');
       controller
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0xFF000000))
-        ..setNavigationDelegate(
-          NavigationDelegate(
-            onPageFinished: (url) async {
-              debugPrint('[DOOM] HTML page loaded: $url');
-              await Future.delayed(const Duration(milliseconds: 300));
+        ..setBackgroundColor(const Color(0xFF000000));
 
-              debugPrint('[DOOM] Injecting WAD data...');
-              try {
-                // HTML loads js-dos via script tags, we just pass the WAD data
-                await _controller?.runJavaScript('''
-                  console.log('[DOOM JS] Receiving game data from Flutter...');
-                  window.gameTitle = "${game.title}";
-                  window.wadData = "$wadBase64";
-                  console.log('[DOOM JS] Data received, calling startDoom...');
-                  if (typeof window.startDoom === 'function') {
-                    window.startDoom();
-                  } else {
-                    console.error('[DOOM JS] startDoom function not found!');
-                  }
-                ''');
-                debugPrint('[DOOM] WAD data injected and startDoom called');
-              } catch (e) {
-                debugPrint('[DOOM] JavaScript injection error: $e');
-              }
+      // Load HTML string with inline scripts
+      debugPrint('[DOOM] Loading HTML with inline scripts...');
+      await controller.loadHtmlString(html, baseUrl: 'about:blank');
+      debugPrint('[DOOM] HTML loaded');
 
-              if (mounted) {
-                setState(() {
-                  _isInitializing = false;
-                  _isPlaying = true;
-                });
-              }
-            },
-            onWebResourceError: (error) {
-              debugPrint('[DOOM] WebView resource error: ${error.description}');
-              debugPrint('[DOOM] Error type: ${error.errorType}');
-              debugPrint('[DOOM] Failed URL: ${error.url}');
-              // Don't treat js-dos.com load errors as fatal anymore since we inject the library
-              if (!error.url.toString().contains('js-dos.com')) {
-                if (mounted) {
-                  setState(() {
-                    _errorMessage = 'Failed to load game: ${error.description}';
-                    _isInitializing = false;
-                    _isPlaying = false;
-                  });
-                }
-              }
-            },
-          ),
-        );
-
-      // Load from asset file (file:// origin bypasses CORS)
-      debugPrint('[DOOM] Loading doom_player.html from assets...');
-      await controller.loadFlutterAsset('assets/doom/doom_player.html');
-      debugPrint('[DOOM] Asset load initiated');
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+          _isPlaying = true;
+        });
+      }
     } catch (e, stackTrace) {
       debugPrint('[DOOM] Error initializing js-dos: $e');
       debugPrint('[DOOM] Stack trace: $stackTrace');
