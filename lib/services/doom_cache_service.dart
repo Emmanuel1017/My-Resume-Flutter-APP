@@ -7,11 +7,10 @@ import 'package:path_provider/path_provider.dart';
 class DoomCacheService {
   static const String _baseUrl = 'https://raw.githubusercontent.com/Emmanuel1017/Angular-Resume/master/src/assets/doom';
 
-  // js-dos library files that need to be cached
+  // js-dos library files that need to be cached (v6.22)
   static const List<String> _jsDosFiles = [
     'js-dos.js',
-    'wdosbox.js',
-    'wdosbox.wasm',
+    'wdosbox.wasm.js',
   ];
 
   static final DoomCacheService _instance = DoomCacheService._internal();

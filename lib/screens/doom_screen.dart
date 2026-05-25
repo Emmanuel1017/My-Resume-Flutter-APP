@@ -235,25 +235,20 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       final wadBase64 = base64Encode(wadBytes);
       debugPrint('[DOOM] WAD Base64 length: ${wadBase64.length} characters');
 
-      // Read js-dos library files
+      // Read js-dos library files (v6.22)
       debugPrint('[DOOM] Reading js-dos library files...');
       final jsDosPath = await _cacheService.getJsDosFilePath('js-dos.js');
-      final wdosboxJsPath = await _cacheService.getJsDosFilePath('wdosbox.js');
-      final wdosboxWasmPath = await _cacheService.getJsDosFilePath('wdosbox.wasm');
+      final wdosboxWasmJsPath = await _cacheService.getJsDosFilePath('wdosbox.wasm.js');
 
-      if (jsDosPath == null || wdosboxJsPath == null || wdosboxWasmPath == null) {
+      if (jsDosPath == null || wdosboxWasmJsPath == null) {
         throw Exception('js-dos library files not found in cache');
       }
 
       final jsDosCode = await File(jsDosPath).readAsString();
       debugPrint('[DOOM] js-dos.js loaded: ${jsDosCode.length} characters');
 
-      final wdosboxJsCode = await File(wdosboxJsPath).readAsString();
-      debugPrint('[DOOM] wdosbox.js loaded: ${wdosboxJsCode.length} characters');
-
-      final wdosboxWasmBytes = await File(wdosboxWasmPath).readAsBytes();
-      final wdosboxWasmBase64 = base64Encode(wdosboxWasmBytes);
-      debugPrint('[DOOM] wdosbox.wasm loaded: ${wdosboxWasmBytes.length} bytes');
+      final wdosboxWasmJsCode = await File(wdosboxWasmJsPath).readAsString();
+      debugPrint('[DOOM] wdosbox.wasm.js loaded: ${wdosboxWasmJsCode.length} characters');
 
       // Create controller first
       debugPrint('[DOOM] Creating WebViewController...');
@@ -277,21 +272,15 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
               debugPrint('[DOOM] HTML page loaded: $url');
               await Future.delayed(const Duration(milliseconds: 300));
 
-              debugPrint('[DOOM] Injecting js-dos library and WAD data...');
+              debugPrint('[DOOM] Injecting js-dos v6.22 library and WAD data...');
               try {
                 // Inject js-dos library code
                 await _controller?.runJavaScript(jsDosCode);
                 debugPrint('[DOOM] js-dos.js injected');
 
-                // Inject wdosbox WASM as base64
-                await _controller?.runJavaScript('''
-                  window.wdosboxWasmData = "$wdosboxWasmBase64";
-                ''');
-                debugPrint('[DOOM] wdosbox.wasm data injected');
-
-                // Inject wdosbox JS code
-                await _controller?.runJavaScript(wdosboxJsCode);
-                debugPrint('[DOOM] wdosbox.js injected');
+                // Inject wdosbox.wasm.js code
+                await _controller?.runJavaScript(wdosboxWasmJsCode);
+                debugPrint('[DOOM] wdosbox.wasm.js injected');
 
                 // Inject game data and start
                 await _controller?.runJavaScript('''

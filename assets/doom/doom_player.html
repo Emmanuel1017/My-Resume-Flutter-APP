@@ -6,21 +6,26 @@
   <title>DOOM Player</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, canvas, #jsdos {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      padding: 0;
+    }
     body {
       background: #000;
       color: #eee;
       font-family: 'Courier New', monospace;
       overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 100vh;
-      width: 100vw;
       touch-action: none;
     }
+    canvas {
+      display: block;
+      user-select: none;
+      -webkit-user-select: none;
+      -moz-user-select: none;
+    }
     #jsdos {
-      width: 100%;
-      height: 100%;
       display: none;
     }
     .loading {
@@ -62,11 +67,11 @@
     <div class="spinner"></div>
     <div>WAITING FOR JS-DOS...</div>
   </div>
-  <div id="jsdos"></div>
+  <canvas id="jsdos"></canvas>
 
   <script>
     const loading = document.getElementById('loading');
-    const jsdosDiv = document.getElementById('jsdos');
+    const jsdosCanvas = document.getElementById('jsdos');
     let dosInstance = null;
 
     function updateLoading(message, isError = false) {
@@ -87,8 +92,8 @@
       return bytes;
     }
 
-    // Wait for WAD data from Flutter (Flutter will inject js-dos library first)
-    window.startDoom = async function() {
+    // Wait for WAD data from Flutter (Flutter injects js-dos v6.22 library first)
+    window.startDoom = function() {
       const gameTitle = window.gameTitle || 'DOOM';
       const wadBase64 = window.wadData;
 
@@ -103,12 +108,12 @@
       }
 
       try {
-        // Check if js-dos loaded
-        if (typeof Dos === 'undefined') {
+        // Check if js-dos v6.22 loaded
+        if (typeof Dos === 'undefined' || typeof Dos !== 'function') {
           updateLoading(
-            'ERROR: js-dos library not loaded<br><br>' +
-            'Flutter should have injected the js-dos library.<br>' +
-            'This is a critical error.',
+            'ERROR: js-dos library not loaded correctly<br><br>' +
+            'typeof Dos: ' + (typeof Dos) + '<br>' +
+            'Flutter should have injected js-dos v6.22.',
             true
           );
           return;
@@ -126,46 +131,49 @@
 
         updateLoading('INITIALIZING DOS EMULATOR...');
 
-        // Create WASM URL from injected data if available
-        let wdosboxUrl = "https://js-dos.com/v7/build/wdosbox.wasm.js";
-        if (window.wdosboxWasmData) {
-          console.log('[DOOM HTML] Using injected wdosbox.wasm data');
-          const wasmData = base64ToArrayBuffer(window.wdosboxWasmData);
-          const wasmBlob = new Blob([wasmData], { type: 'application/wasm' });
-          wdosboxUrl = URL.createObjectURL(wasmBlob);
-        }
-
-        // Initialize js-dos
-        dosInstance = Dos(jsdosDiv, {
-          wdosboxUrl: wdosboxUrl,
+        // Initialize js-dos v6.22 with correct API
+        // Dos(canvas, options).ready(callback)
+        dosInstance = Dos(jsdosCanvas, {
+          // wdosboxUrl not needed since wdosbox.wasm.js is already injected
         });
 
-        console.log('[DOOM HTML] Dos instance created');
+        console.log('[DOOM HTML] Dos instance created, calling ready...');
 
-        dosInstance.ready((fs, main) => {
+        // Use .ready() callback (v6.22 API)
+        dosInstance.ready(function(fs, main) {
           console.log('[DOOM HTML] Dos ready, extracting bundle...');
           updateLoading('EXTRACTING ' + gameTitle + ' FILES...');
 
-          fs.extract(blobUrl).then(() => {
+          fs.extract(blobUrl).then(function() {
             console.log('[DOOM HTML] Bundle extracted, starting game...');
             updateLoading('STARTING ' + gameTitle + '...');
 
             // Hide loading, show game
-            setTimeout(() => {
+            setTimeout(function() {
               loading.style.display = 'none';
-              jsdosDiv.style.display = 'block';
+              jsdosCanvas.style.display = 'block';
             }, 500);
 
             // Start DOOM
-            // The .jsdos bundle contains the game and autostart config
-            main([]);
+            // The .jsdos bundle contains autoexec.bat
+            main([]).then(function(ci) {
+              console.log('[DOOM HTML] Game started!');
+              window.ci = ci;
+            }).catch(function(err) {
+              console.error('[DOOM HTML] Main error:', err);
+              updateLoading(
+                'ERROR STARTING GAME:<br><br>' + err.message,
+                true
+              );
+              loading.style.display = 'block';
+            });
 
-          }).catch(err => {
+          }).catch(function(err) {
             console.error('[DOOM HTML] Extract error:', err);
             updateLoading(
               'ERROR EXTRACTING BUNDLE:<br><br>' +
               err.message + '<br><br>' +
-              'The .jsdos file may be corrupted or invalid.',
+              'The .jsdos file may be corrupted.',
               true
             );
           });
@@ -176,14 +184,14 @@
         updateLoading(
           'ERROR LOADING GAME:<br><br>' +
           err.message + '<br><br>' +
-          err.stack,
+          (err.stack || ''),
           true
         );
       }
     };
 
     console.log('[DOOM HTML] Page loaded');
-    console.log('[DOOM HTML] Waiting for Flutter to inject js-dos library and call startDoom()...');
+    console.log('[DOOM HTML] Waiting for Flutter to inject js-dos v6.22 and call startDoom()...');
   </script>
 </body>
 </html>
