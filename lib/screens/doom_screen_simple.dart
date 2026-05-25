@@ -225,39 +225,108 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
           children: [
             WebViewWidget(controller: _controller!),
 
-            // Loading indicator
+            // Loading/Tap to start overlay
             if (_isLoading)
-              const Center(
-                child: CircularProgressIndicator(
-                  color: Color(0xFFc41e1e),
+              GestureDetector(
+                onTap: () async {
+                  // User tap triggers the game start
+                  await _controller?.runJavaScript('''
+                    // On user tap, click play button and hide UI
+                    (function() {
+                      console.log('[Flutter] User tapped, starting game...');
+
+                      // Click any visible button
+                      const buttons = document.querySelectorAll('button, a, [role="button"]');
+                      buttons.forEach(btn => {
+                        if (btn.offsetParent !== null) {
+                          btn.click();
+                          console.log('[Flutter] Clicked:', btn);
+                        }
+                      });
+
+                      // Click canvas
+                      const canvas = document.querySelector('canvas');
+                      if (canvas) {
+                        canvas.click();
+                      }
+
+                      // Press Enter
+                      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13 }));
+
+                      // Request fullscreen (works now because of user gesture)
+                      setTimeout(() => {
+                        const elem = document.documentElement;
+                        if (elem.requestFullscreen) {
+                          elem.requestFullscreen();
+                        }
+                      }, 100);
+                    })();
+                  ''');
+
+                  setState(() {
+                    _isLoading = false;
+                  });
+                },
+                child: Container(
+                  color: Colors.black87,
+                  child: const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.touch_app,
+                          color: Color(0xFFc41e1e),
+                          size: 64,
+                        ),
+                        SizedBox(height: 20),
+                        Text(
+                          'TAP TO START',
+                          style: TextStyle(
+                            color: Color(0xFFc41e1e),
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        SizedBox(height: 10),
+                        Text(
+                          'Loading game assets...',
+                          style: TextStyle(
+                            color: Colors.white60,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
 
-            // Back button
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 8,
-              child: Material(
-                color: Colors.transparent,
-                child: IconButton(
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFFc41e1e).withOpacity(0.5),
+            // Back button (only visible when playing)
+            if (!_isLoading)
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 8,
+                left: 8,
+                child: Material(
+                  color: Colors.transparent,
+                  child: IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.7),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: const Color(0xFFc41e1e).withOpacity(0.5),
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.arrow_back,
+                        color: Color(0xFF00ff41),
                       ),
                     ),
-                    child: const Icon(
-                      Icons.arrow_back,
-                      color: Color(0xFF00ff41),
-                    ),
+                    onPressed: _backToMenu,
                   ),
-                  onPressed: _backToMenu,
                 ),
               ),
-            ),
           ],
         ),
       );
