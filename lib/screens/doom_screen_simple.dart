@@ -100,13 +100,22 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
                       z-index: 9999 !important;
                     }
 
-                    /* Canvas fills container */
+                    /* Canvas fills container - maintain aspect ratio */
                     .dos-container canvas,
                     #jsdos canvas,
                     canvas {
                       width: 100% !important;
                       height: 100% !important;
                       display: block !important;
+                      object-fit: contain !important;
+                    }
+
+                    /* Remove any padding/margins from containers */
+                    .dos-container,
+                    #jsdos,
+                    .dos-wrapper {
+                      padding: 0 !important;
+                      margin: 0 !important;
                     }
 
                     /* Hide body scrolling */
@@ -164,7 +173,10 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
         backgroundColor: Colors.black,
         body: Stack(
           children: [
-            WebViewWidget(controller: _controller!),
+            // Game WebView - fullscreen
+            Positioned.fill(
+              child: WebViewWidget(controller: _controller!),
+            ),
 
             // Loading/Tap to start overlay
             if (_isLoading)
@@ -242,11 +254,17 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
                 ),
               ),
 
+            // Virtual Controls (only visible when playing)
+            if (!_isLoading)
+              Positioned.fill(
+                child: _VirtualControls(controller: _controller),
+              ),
+
             // Back button (only visible when playing)
             if (!_isLoading)
               Positioned(
-                top: MediaQuery.of(context).padding.top + 8,
-                left: 8,
+                top: 8,
+                right: 8,
                 child: Material(
                   color: Colors.transparent,
                   child: IconButton(
@@ -260,7 +278,7 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
                         ),
                       ),
                       child: const Icon(
-                        Icons.arrow_back,
+                        Icons.close,
                         color: Color(0xFF00ff41),
                       ),
                     ),
@@ -465,6 +483,143 @@ class _GameCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+// Virtual game controls overlay
+class _VirtualControls extends StatelessWidget {
+  final WebViewController? controller;
+
+  const _VirtualControls({required this.controller});
+
+  Future<void> _sendKey(String key) async {
+    await controller?.runJavaScript('''
+      document.dispatchEvent(new KeyboardEvent('keydown', {
+        key: '$key',
+        code: 'Key${key.toUpperCase()}',
+        keyCode: ${_getKeyCode(key)},
+        bubbles: true
+      }));
+      setTimeout(() => {
+        document.dispatchEvent(new KeyboardEvent('keyup', {
+          key: '$key',
+          code: 'Key${key.toUpperCase()}',
+          keyCode: ${_getKeyCode(key)},
+          bubbles: true
+        }));
+      }, 100);
+    ''');
+  }
+
+  int _getKeyCode(String key) {
+    final codes = {
+      'ArrowUp': 38, 'ArrowDown': 40, 'ArrowLeft': 37, 'ArrowRight': 39,
+      'Control': 17, ' ': 32, 'Enter': 13, 'Shift': 16,
+      '1': 49, '2': 50, '3': 51, '4': 52, '5': 53, '6': 54, '7': 55,
+    };
+    return codes[key] ?? 65;
+  }
+
+  Widget _buildButton({
+    required IconData icon,
+    required String key,
+    String? label,
+    double size = 60,
+  }) {
+    return GestureDetector(
+      onTapDown: (_) => _sendKey(key),
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.5),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: const Color(0xFFc41e1e).withOpacity(0.6),
+            width: 2,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: Colors.white70, size: size * 0.4),
+            if (label != null)
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: size * 0.15,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        // D-Pad (Left side)
+        Positioned(
+          left: 20,
+          bottom: 20,
+          child: SizedBox(
+            width: 180,
+            height: 180,
+            child: Stack(
+              children: [
+                Positioned(top: 0, left: 60, child: _buildButton(icon: Icons.arrow_drop_up, key: 'ArrowUp')),
+                Positioned(bottom: 0, left: 60, child: _buildButton(icon: Icons.arrow_drop_down, key: 'ArrowDown')),
+                Positioned(left: 0, top: 60, child: _buildButton(icon: Icons.arrow_left, key: 'ArrowLeft')),
+                Positioned(right: 0, top: 60, child: _buildButton(icon: Icons.arrow_right, key: 'ArrowRight')),
+              ],
+            ),
+          ),
+        ),
+
+        // Action buttons (Right side)
+        Positioned(
+          right: 20,
+          bottom: 80,
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  _buildButton(icon: Icons.radio_button_checked, key: 'Control', label: 'FIRE', size: 70),
+                  const SizedBox(width: 12),
+                  _buildButton(icon: Icons.touch_app, key: ' ', label: 'USE', size: 70),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _buildButton(icon: Icons.swap_horiz, key: 'Shift', label: 'RUN', size: 55),
+                  const SizedBox(width: 8),
+                  _buildButton(icon: Icons.menu, key: 'Enter', label: 'MENU', size: 55),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        // Weapon select (Top right)
+        Positioned(
+          top: 60,
+          right: 20,
+          child: Row(
+            children: List.generate(7, (i) {
+              return Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: _buildButton(icon: Icons.looks_one, key: '${i + 1}', size: 40),
+              );
+            }),
+          ),
+        ),
+      ],
     );
   }
 }
