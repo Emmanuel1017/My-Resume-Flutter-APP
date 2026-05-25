@@ -111,7 +111,7 @@ class ExtrasScreen extends StatelessWidget {
                     onTap: () {
                       HapticFeedback.mediumImpact();
                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const DoomScreenSimple(game: 'doom1')),
+                        MaterialPageRoute(builder: (_) => const DoomScreenSimple()),
                       );
                     },
                   ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
