@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import 'doom_screen.dart';
+import 'doom_screen_simple.dart';
 import 'relax_game_screen.dart';
 
 /// Extras screen containing games and fun interactive elements
@@ -111,7 +111,7 @@ class ExtrasScreen extends StatelessWidget {
                     onTap: () {
                       HapticFeedback.mediumImpact();
                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const DoomScreen()),
+                        MaterialPageRoute(builder: (_) => const DoomScreenSimple()),
                       );
                     },
                   ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
