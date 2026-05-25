@@ -6,12 +6,10 @@ class DoomScreenSimple extends StatelessWidget {
   const DoomScreenSimple({super.key});
 
   Future<void> _launchDoom(BuildContext context, String game) async {
-    final wadUrl = game == 'doom1'
-        ? 'https://raw.githubusercontent.com/Emmanuel1017/Angular-Resume/master/src/assets/doom/doom.jsdos'
-        : 'https://raw.githubusercontent.com/Emmanuel1017/Angular-Resume/master/src/assets/doom/doom2.jsdos';
-
-    // Use dos.zone player
-    final playerUrl = 'https://dos.zone/player/?bundleUrl=$wadUrl';
+    // Use your custom DOOM page
+    final playerUrl = game == 'doom1'
+        ? 'https://emmanuel1017.github.io/Angular-Resume/doom'
+        : 'https://emmanuel1017.github.io/Angular-Resume/doom?game=doom2';
 
     final uri = Uri.parse(playerUrl);
     try {
