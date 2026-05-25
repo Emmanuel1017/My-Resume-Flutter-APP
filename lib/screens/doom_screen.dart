@@ -238,17 +238,17 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       // Read js-dos library files (v6.22)
       debugPrint('[DOOM] Reading js-dos library files...');
       final jsDosPath = await _cacheService.getJsDosFilePath('js-dos.js');
-      final wdosboxWasmJsPath = await _cacheService.getJsDosFilePath('wdosbox.wasm.js');
+      final wdosboxJsPath = await _cacheService.getJsDosFilePath('wdosbox.js');
 
-      if (jsDosPath == null || wdosboxWasmJsPath == null) {
+      if (jsDosPath == null || wdosboxJsPath == null) {
         throw Exception('js-dos library files not found in cache');
       }
 
       final jsDosCode = await File(jsDosPath).readAsString();
       debugPrint('[DOOM] js-dos.js loaded: ${jsDosCode.length} characters');
 
-      final wdosboxWasmJsCode = await File(wdosboxWasmJsPath).readAsString();
-      debugPrint('[DOOM] wdosbox.wasm.js loaded: ${wdosboxWasmJsCode.length} characters');
+      final wdosboxJsCode = await File(wdosboxJsPath).readAsString();
+      debugPrint('[DOOM] wdosbox.js loaded: ${wdosboxJsCode.length} characters');
 
       // Create controller first
       debugPrint('[DOOM] Creating WebViewController...');
@@ -278,9 +278,9 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
                 await _controller?.runJavaScript(jsDosCode);
                 debugPrint('[DOOM] js-dos.js injected');
 
-                // Inject wdosbox.wasm.js code
-                await _controller?.runJavaScript(wdosboxWasmJsCode);
-                debugPrint('[DOOM] wdosbox.wasm.js injected');
+                // Inject wdosbox.js code
+                await _controller?.runJavaScript(wdosboxJsCode);
+                debugPrint('[DOOM] wdosbox.js injected');
 
                 // Inject game data and start
                 await _controller?.runJavaScript('''

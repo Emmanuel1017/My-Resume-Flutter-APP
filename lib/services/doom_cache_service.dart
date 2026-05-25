@@ -10,7 +10,7 @@ class DoomCacheService {
   // js-dos library files that need to be cached (v6.22)
   static const List<String> _jsDosFiles = [
     'js-dos.js',
-    'wdosbox.wasm.js',
+    'wdosbox.js',
   ];
 
   static final DoomCacheService _instance = DoomCacheService._internal();
