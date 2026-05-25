@@ -47,7 +47,7 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
       ..setBackgroundColor(Colors.black)
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (url) {
+          onPageFinished: (url) async {
             if (mounted) {
               // Set landscape and fullscreen when page loads
               SystemChrome.setPreferredOrientations([
@@ -56,9 +56,136 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
               ]);
               SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
-              setState(() {
-                _isLoading = false;
-              });
+              // Wait a bit for page to initialize
+              await Future.delayed(const Duration(milliseconds: 1000));
+
+              // Monitor loading and auto-start game
+              await _controller?.runJavaScript('''
+                // Monitor and auto-start
+                (function() {
+                  console.log('[Flutter] Initializing auto-start...');
+
+                  // Hide UI elements
+                  const style = document.createElement('style');
+                  style.textContent = `
+                    /* Hide sidebar and controls */
+                    .dos-zone-sidebar,
+                    .dos-zone-controls,
+                    .sidebar,
+                    .controls,
+                    canvas:not(.dos-canvas),
+                    [class*="sidebar"],
+                    [class*="control"],
+                    [id*="sidebar"],
+                    [id*="control"] {
+                      display: none !important;
+                    }
+
+                    /* Hide purple/black overlays */
+                    div[style*="position: absolute"],
+                    div[style*="z-index"] {
+                      background: transparent !important;
+                      border: none !important;
+                    }
+
+                    /* Make canvas fullscreen */
+                    canvas, .dos-canvas, #jsdos {
+                      width: 100vw !important;
+                      height: 100vh !important;
+                      position: fixed !important;
+                      top: 0 !important;
+                      left: 0 !important;
+                      z-index: 9999 !important;
+                    }
+
+                    /* Hide everything except canvas */
+                    body > *:not(canvas):not(script):not(style) {
+                      display: none !important;
+                    }
+                  `;
+                  document.head.appendChild(style);
+
+                  // Monitor for game ready and auto-click
+                  let clickAttempts = 0;
+                  const maxAttempts = 20;
+
+                  function tryAutoStart() {
+                    clickAttempts++;
+                    console.log('[Flutter] Auto-start attempt:', clickAttempts);
+
+                    // Check if game is loaded
+                    const canvas = document.querySelector('canvas');
+                    if (canvas && canvas.width > 0) {
+                      console.log('[Flutter] Canvas found, game loading...');
+                    }
+
+                    // Try multiple selectors for play button
+                    const selectors = [
+                      'button[class*="play"]',
+                      'button[class*="start"]',
+                      'button[class*="Play"]',
+                      'button[class*="Start"]',
+                      '.play-button',
+                      '.start-button',
+                      'button',
+                      '.dos-ci-play-button',
+                      '[onclick*="play"]',
+                      '[onclick*="start"]'
+                    ];
+
+                    let clicked = false;
+                    for (const selector of selectors) {
+                      const buttons = document.querySelectorAll(selector);
+                      buttons.forEach(btn => {
+                        if (btn && btn.offsetParent !== null && !clicked) {
+                          const text = btn.textContent.toLowerCase();
+                          if (text.includes('play') || text.includes('start') || text.includes('run')) {
+                            console.log('[Flutter] Clicking button:', text, btn);
+                            btn.click();
+                            clicked = true;
+                          }
+                        }
+                      });
+                      if (clicked) break;
+                    }
+
+                    // Try clicking canvas
+                    if (!clicked && canvas) {
+                      console.log('[Flutter] Clicking canvas');
+                      canvas.click();
+                      clicked = true;
+                    }
+
+                    // Try pressing Enter key
+                    if (!clicked) {
+                      console.log('[Flutter] Pressing Enter');
+                      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', keyCode: 13 }));
+                    }
+
+                    // Request fullscreen
+                    const elem = document.documentElement;
+                    if (elem.requestFullscreen) {
+                      elem.requestFullscreen().catch(e => {});
+                    }
+
+                    // Keep trying if not successful
+                    if (clickAttempts < maxAttempts) {
+                      setTimeout(tryAutoStart, 500);
+                    } else {
+                      console.log('[Flutter] Auto-start completed after', clickAttempts, 'attempts');
+                    }
+                  }
+
+                  // Start attempting after page is ready
+                  setTimeout(tryAutoStart, 500);
+                })();
+              ''');
+
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                });
+              }
             }
           },
           onWebResourceError: (error) {
