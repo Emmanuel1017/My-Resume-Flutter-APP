@@ -327,32 +327,65 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
 
       updateLoading('INITIALIZING...');
 
-      Dos(canvas, {}).ready(function(fs, main) {
-        console.log('[DOOM] Ready!');
-        updateLoading('EXTRACTING...');
+      try {
+        const dosInstance = Dos(canvas, {});
+        console.log('[DOOM] Dos instance:', dosInstance);
+        console.log('[DOOM] typeof dosInstance:', typeof dosInstance);
+        console.log('[DOOM] dosInstance.ready:', dosInstance.ready);
+        console.log('[DOOM] typeof dosInstance.ready:', typeof dosInstance.ready);
 
-        fs.extract(blobUrl).then(function() {
-          console.log('[DOOM] Extracted!');
-          updateLoading('STARTING ${game.title}...');
+        // Check if it's a promise (js-dos v7/v8 style)
+        if (dosInstance && typeof dosInstance.then === 'function') {
+          console.log('[DOOM] Dos() returned a promise, using promise API...');
+          dosInstance.then(function(runtime) {
+            console.log('[DOOM] Runtime ready!');
+            updateLoading('EXTRACTING...');
 
-          setTimeout(function() {
-            loading.style.display = 'none';
-            canvas.style.display = 'block';
-          }, 500);
+            runtime.fs.extract(blobUrl).then(function() {
+              console.log('[DOOM] Extracted!');
+              updateLoading('STARTING ${game.title}...');
 
-          main([]).then(function(ci) {
-            console.log('[DOOM] Started!');
-            window.ci = ci;
-          }).catch(function(err) {
-            console.error('[DOOM] Error:', err);
-            updateLoading('ERROR: ' + err.message, true);
-            loading.style.display = 'block';
+              setTimeout(function() {
+                loading.style.display = 'none';
+                canvas.style.display = 'block';
+              }, 500);
+
+              runtime.main([]).then(function(ci) {
+                console.log('[DOOM] Started!');
+                window.ci = ci;
+              });
+            });
           });
-        }).catch(function(err) {
-          console.error('[DOOM] Extract error:', err);
-          updateLoading('ERROR: ' + err.message, true);
-        });
-      });
+        }
+        // Check if it has .ready() (js-dos v6.22 style)
+        else if (dosInstance && typeof dosInstance.ready === 'function') {
+          console.log('[DOOM] Using .ready() API...');
+          dosInstance.ready(function(fs, main) {
+            console.log('[DOOM] Ready!');
+            updateLoading('EXTRACTING...');
+
+            fs.extract(blobUrl).then(function() {
+              console.log('[DOOM] Extracted!');
+              updateLoading('STARTING ${game.title}...');
+
+              setTimeout(function() {
+                loading.style.display = 'none';
+                canvas.style.display = 'block';
+              }, 500);
+
+              main([]).then(function(ci) {
+                console.log('[DOOM] Started!');
+                window.ci = ci;
+              });
+            });
+          });
+        } else {
+          throw new Error('Unknown Dos() API. Got: ' + typeof dosInstance + ', ready: ' + typeof dosInstance.ready);
+        }
+      } catch (err) {
+        console.error('[DOOM] Initialization error:', err);
+        updateLoading('ERROR: ' + err.message, true);
+      }
     }
   </script>
 </body>
@@ -367,7 +400,7 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
 
       // Load HTML string with inline scripts
       debugPrint('[DOOM] Loading HTML with inline scripts...');
-      await controller.loadHtmlString(html, baseUrl: 'about:blank');
+      await controller.loadHtmlString(html, baseUrl: 'http://localhost/');
       debugPrint('[DOOM] HTML loaded');
 
       if (mounted) {
