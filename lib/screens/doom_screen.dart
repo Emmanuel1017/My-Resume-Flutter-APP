@@ -273,10 +273,10 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
   <title>DOOM</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body, canvas { width: 100%; height: 100%; margin: 0; padding: 0; }
-    body { background: #000; overflow: hidden; touch-action: none; }
-    canvas { display: block; user-select: none; }
-    .loading { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff41; font-size: 1.1rem; padding: 2rem; z-index: 10; text-shadow: 0 0 10px #00ff41; }
+    html, body { width: 100%; height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
+    #jsdos { width: 100vw; height: 100vh; display: block; }
+    canvas { display: block; user-select: none; touch-action: none; }
+    .loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff41; font-size: 1.1rem; padding: 2rem; z-index: 1000; text-shadow: 0 0 10px #00ff41; background: rgba(0,0,0,0.8); border-radius: 10px; }
     .error { color: #c41e1e; }
     .spinner { border: 4px solid #333; border-top: 4px solid #00ff41; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
@@ -284,7 +284,7 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
 </head>
 <body>
   <div class="loading" id="loading"><div class="spinner"></div><div>INITIALIZING...</div></div>
-  <canvas id="jsdos" style="display:none;"></canvas>
+  <div id="jsdos"></div>
 
   <script>
     // Inline js-dos library
@@ -298,7 +298,7 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
 
   <script>
     const loading = document.getElementById('loading');
-    const canvas = document.getElementById('jsdos');
+    const jsdos = document.getElementById('jsdos');
 
     function updateLoading(msg, isError) {
       loading.innerHTML = isError ? '<div class="error">' + msg + '</div>' : '<div class="spinner"></div><div>' + msg + '</div>';
@@ -313,6 +313,7 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
     }
 
     console.log('[DOOM] typeof Dos:', typeof Dos);
+    console.log('[DOOM] jsdos div:', jsdos);
 
     if (typeof Dos !== 'function') {
       updateLoading('ERROR: js-dos not loaded', true);
@@ -328,36 +329,26 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       updateLoading('INITIALIZING...');
 
       try {
-        // js-dos v8 API: pass bundleUrl in constructor options
+        // js-dos v8 API: Dos(element, options)
         console.log('[DOOM] Creating Dos with bundleUrl:', blobUrl);
 
-        updateLoading('LOADING BUNDLE...');
+        updateLoading('LOADING ${game.title}...');
 
-        // Show canvas immediately
-        canvas.style.display = 'block';
-
-        const dosInstance = Dos(canvas, {
-          bundleUrl: blobUrl,
-          onprogress: function(stage, total, loaded) {
-            console.log('[DOOM] Progress:', stage, loaded + '/' + total);
-            if (stage === 'Extracting') {
-              updateLoading('EXTRACTING...');
-            } else if (stage === 'Starting') {
-              updateLoading('STARTING ${game.title}...');
-            }
-          }
+        const dosInstance = Dos(jsdos, {
+          url: blobUrl
         });
 
-        console.log('[DOOM] Dos instance created');
+        console.log('[DOOM] Dos instance created, methods:', Object.keys(dosInstance).slice(0, 10));
         window.dosInstance = dosInstance;
 
-        // Wait a bit then hide loading
+        // Wait then hide loading
         setTimeout(function() {
           console.log('[DOOM] Hiding loading overlay');
           loading.style.display = 'none';
-        }, 3000);
+        }, 5000);
       } catch (err) {
-        console.error('[DOOM] Initialization error:', err);
+        console.error('[DOOM] Error:', err);
+        console.error('[DOOM] Stack:', err.stack);
         updateLoading('ERROR: ' + err.message, true);
       }
     }
