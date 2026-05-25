@@ -331,19 +331,31 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
         // js-dos v8 API: pass bundleUrl in constructor options
         console.log('[DOOM] Creating Dos with bundleUrl:', blobUrl);
 
-        updateLoading('STARTING ${game.title}...');
+        updateLoading('LOADING BUNDLE...');
 
-        setTimeout(function() {
-          loading.style.display = 'none';
-          canvas.style.display = 'block';
-        }, 1000);
+        // Show canvas immediately
+        canvas.style.display = 'block';
 
         const dosInstance = Dos(canvas, {
-          bundleUrl: blobUrl
+          bundleUrl: blobUrl,
+          onprogress: function(stage, total, loaded) {
+            console.log('[DOOM] Progress:', stage, loaded + '/' + total);
+            if (stage === 'Extracting') {
+              updateLoading('EXTRACTING...');
+            } else if (stage === 'Starting') {
+              updateLoading('STARTING ${game.title}...');
+            }
+          }
         });
 
-        console.log('[DOOM] Dos instance created, bundle should auto-load');
+        console.log('[DOOM] Dos instance created');
         window.dosInstance = dosInstance;
+
+        // Wait a bit then hide loading
+        setTimeout(function() {
+          console.log('[DOOM] Hiding loading overlay');
+          loading.style.display = 'none';
+        }, 3000);
       } catch (err) {
         console.error('[DOOM] Initialization error:', err);
         updateLoading('ERROR: ' + err.message, true);
