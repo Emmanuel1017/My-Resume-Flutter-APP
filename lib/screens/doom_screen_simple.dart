@@ -1,33 +1,109 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
-/// Simplified DOOM screen - launches external DOOM player
-class DoomScreenSimple extends StatelessWidget {
+/// Simplified DOOM screen - embedded WebView
+class DoomScreenSimple extends StatefulWidget {
   const DoomScreenSimple({super.key});
 
-  Future<void> _launchDoom(BuildContext context, String game) async {
-    // Use your custom DOOM page
-    final playerUrl = game == 'doom1'
+  @override
+  State<DoomScreenSimple> createState() => _DoomScreenSimpleState();
+}
+
+class _DoomScreenSimpleState extends State<DoomScreenSimple> {
+  String? _selectedGame;
+  WebViewController? _controller;
+  bool _isLoading = false;
+
+  void _loadGame(String game) {
+    setState(() {
+      _selectedGame = game;
+      _isLoading = true;
+    });
+
+    final url = game == 'doom1'
         ? 'https://emmanuel1017.github.io/Angular-Resume/doom'
         : 'https://emmanuel1017.github.io/Angular-Resume/doom?game=doom2';
 
-    final uri = Uri.parse(playerUrl);
-    try {
-      await launchUrl(
-        uri,
-        mode: LaunchMode.platformDefault, // Opens in default browser
-      );
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not launch DOOM: $e')),
-        );
-      }
-    }
+    final controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(Colors.black)
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) {
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
+          },
+          onWebResourceError: (error) {
+            debugPrint('[DOOM] Error: ${error.description}');
+          },
+        ),
+      )
+      ..loadRequest(Uri.parse(url));
+
+    setState(() {
+      _controller = controller;
+    });
+  }
+
+  void _backToMenu() {
+    setState(() {
+      _selectedGame = null;
+      _controller = null;
+    });
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_selectedGame != null && _controller != null) {
+      // Show WebView with game
+      return Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            WebViewWidget(controller: _controller!),
+
+            // Loading indicator
+            if (_isLoading)
+              const Center(
+                child: CircularProgressIndicator(
+                  color: Color(0xFFc41e1e),
+                ),
+              ),
+
+            // Back button
+            Positioned(
+              top: MediaQuery.of(context).padding.top + 8,
+              left: 8,
+              child: Material(
+                color: Colors.transparent,
+                child: IconButton(
+                  icon: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: const Color(0xFFc41e1e).withOpacity(0.5),
+                      ),
+                    ),
+                    child: const Icon(
+                      Icons.arrow_back,
+                      color: Color(0xFF00ff41),
+                    ),
+                  ),
+                  onPressed: _backToMenu,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // Show game selection menu
     return Scaffold(
       backgroundColor: const Color(0xFF0a0a0a),
       appBar: AppBar(
@@ -48,7 +124,7 @@ class DoomScreenSimple extends StatelessWidget {
             ),
             const SizedBox(height: 40),
             ElevatedButton(
-              onPressed: () => _launchDoom(context, 'doom1'),
+              onPressed: () => _loadGame('doom1'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFc41e1e),
                 padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
@@ -60,7 +136,7 @@ class DoomScreenSimple extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             ElevatedButton(
-              onPressed: () => _launchDoom(context, 'doom2'),
+              onPressed: () => _loadGame('doom2'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFFc41e1e),
                 padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
