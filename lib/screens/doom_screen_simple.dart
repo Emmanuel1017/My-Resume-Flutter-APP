@@ -14,12 +14,15 @@ class DoomScreenSimple extends StatelessWidget {
     final playerUrl = 'https://dos.zone/player/?bundleUrl=$wadUrl';
 
     final uri = Uri.parse(playerUrl);
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
+    try {
+      await launchUrl(
+        uri,
+        mode: LaunchMode.platformDefault, // Opens in default browser
+      );
+    } catch (e) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not launch DOOM')),
+          SnackBar(content: Text('Could not launch DOOM: $e')),
         );
       }
     }
