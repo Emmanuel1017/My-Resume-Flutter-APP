@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 /// Simplified DOOM screen - embedded WebView
 class DoomScreenSimple extends StatefulWidget {
-  const DoomScreenSimple({super.key});
+  final String? game; // 'doom1' or 'doom2', null shows menu
+
+  const DoomScreenSimple({super.key, this.game});
 
   @override
   State<DoomScreenSimple> createState() => _DoomScreenSimpleState();
@@ -14,7 +17,37 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
   WebViewController? _controller;
   bool _isLoading = false;
 
+  @override
+  void initState() {
+    super.initState();
+
+    // If game is passed, load it directly in landscape fullscreen
+    if (widget.game != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _loadGame(widget.game!);
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    // Restore portrait when leaving
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    super.dispose();
+  }
+
   void _loadGame(String game) {
+    // Set landscape and fullscreen
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
     setState(() {
       _selectedGame = game;
       _isLoading = true;
@@ -49,10 +82,23 @@ class _DoomScreenSimpleState extends State<DoomScreenSimple> {
   }
 
   void _backToMenu() {
-    setState(() {
-      _selectedGame = null;
-      _controller = null;
-    });
+    // Restore portrait
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+
+    if (widget.game != null) {
+      // If game was passed in constructor, go back to previous screen
+      Navigator.of(context).pop();
+    } else {
+      // Otherwise just hide the game view
+      setState(() {
+        _selectedGame = null;
+        _controller = null;
+      });
+    }
   }
 
   @override
