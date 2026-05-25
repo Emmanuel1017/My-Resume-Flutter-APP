@@ -328,36 +328,22 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       updateLoading('INITIALIZING...');
 
       try {
-        const dosInstance = Dos(canvas);
-        console.log('[DOOM] Dos instance created');
-        console.log('[DOOM] typeof dosInstance.run:', typeof dosInstance.run);
+        // js-dos v8 API: pass bundleUrl in constructor options
+        console.log('[DOOM] Creating Dos with bundleUrl:', blobUrl);
 
-        // js-dos v8 API: Dos(element).run(bundle_url)
-        if (typeof dosInstance.run === 'function') {
-          console.log('[DOOM] Using js-dos v8 API with .run()...');
+        updateLoading('STARTING ${game.title}...');
 
-          // Configure before running
-          dosInstance.setAutoStart(true);
+        setTimeout(function() {
+          loading.style.display = 'none';
+          canvas.style.display = 'block';
+        }, 1000);
 
-          updateLoading('STARTING ${game.title}...');
+        const dosInstance = Dos(canvas, {
+          bundleUrl: blobUrl
+        });
 
-          setTimeout(function() {
-            loading.style.display = 'none';
-            canvas.style.display = 'block';
-          }, 500);
-
-          // Run with blob URL
-          dosInstance.run(blobUrl).then(function(ci) {
-            console.log('[DOOM] Started!');
-            window.ci = ci;
-          }).catch(function(err) {
-            console.error('[DOOM] Run error:', err);
-            updateLoading('ERROR: ' + err.message, true);
-            loading.style.display = 'block';
-          });
-        } else {
-          throw new Error('dosInstance.run not found. Available methods: ' + Object.keys(dosInstance).join(', '));
-        }
+        console.log('[DOOM] Dos instance created, bundle should auto-load');
+        window.dosInstance = dosInstance;
       } catch (err) {
         console.error('[DOOM] Initialization error:', err);
         updateLoading('ERROR: ' + err.message, true);
