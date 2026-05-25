@@ -13,6 +13,7 @@ import 'profile_screen.dart';
 import 'dashboard_screen.dart';
 import 'messages_screen.dart';
 import 'kori_screen.dart';
+import 'extras_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -40,7 +41,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // terminated state → land directly on Messages).
     final requested = pendingHomeTab.value;
     if (requested != null) {
-      _tab = requested.clamp(0, 4);
+      _tab = requested.clamp(0, 5);
       pendingHomeTab.value = null;
     }
     // Update the tap-target callback (already-initialised init() will only
@@ -48,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> {
     // that we know the user is signed in — covers the case where init
     // fired in main.dart before auth restored.
     FcmService.instance.init(
-      onOpen: () => mounted ? setState(() => _tab = 4) : null,
+      onOpen: () => mounted ? setState(() => _tab = 5) : null,
     );
     FcmService.instance.ensureTokenSaved();
     VisitTracker.track(source: 'flutter-admin');
@@ -59,7 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _onPendingTabChange() {
     final t = pendingHomeTab.value;
     if (t != null && mounted) {
-      setState(() => _tab = t.clamp(0, 4));
+      setState(() => _tab = t.clamp(0, 5));
       pendingHomeTab.value = null;
     }
   }
@@ -92,8 +93,9 @@ class _HomeScreenState extends State<HomeScreen> {
           if (_tab == 0) const PortfolioScreen(),
           if (_tab == 1) const KoriScreen(),
           if (_tab == 2) const ProfileScreen(),
-          if (_tab == 3) const DashboardScreen(),
-          if (_tab == 4) const MessagesScreen(),
+          if (_tab == 3) const ExtrasScreen(),
+          if (_tab == 4) const DashboardScreen(),
+          if (_tab == 5) const MessagesScreen(),
         ],
       ),
       // RepaintBoundary isolates the nav bar so unread-count updates never
@@ -128,6 +130,7 @@ class _NavBar extends StatelessWidget {
     _NavItem(icon: Icons.language_rounded,             label: 'Portfolio'),
     _NavItem(icon: Icons.auto_awesome_rounded,         label: 'Kori'),
     _NavItem(icon: Icons.person_rounded,               label: 'Profile'),
+    _NavItem(icon: Icons.extension_rounded,            label: 'Extras'),
     _NavItem(icon: Icons.admin_panel_settings_rounded, label: 'Admin'),
     _NavItem(icon: Icons.inbox_rounded,                label: 'Messages'),
   ];
@@ -160,7 +163,7 @@ class _NavBar extends StatelessWidget {
               final item   = _items[i];
               final active = i == selected;
               final color  = active ? AppColors.accent : AppColors.textLow;
-              final badge  = (i == 4 && unreadCount > 0 && !active)
+              final badge  = (i == 5 && unreadCount > 0 && !active)
                   ? unreadCount : 0;
 
               return Expanded(

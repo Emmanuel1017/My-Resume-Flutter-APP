@@ -46,10 +46,10 @@ void main() async {
   // ── FCM ────────────────────────────────────────────────────────────────────
   // Init runs before runApp so the background isolate handler is registered
   // before any push can arrive. Tapping a notification flips pendingHomeTab to
-  // 4 (Messages); HomeScreen consumes that and selects the right tab.
+  // 5 (Messages); HomeScreen consumes that and selects the right tab.
   await FcmService.instance.init(
     onOpen: () {
-      pendingHomeTab.value = 4; // Messages tab in admin home
+      pendingHomeTab.value = 5; // Messages tab in admin home
       navigatorKey.currentState?.pushNamedAndRemoveUntil('/home', (_) => false);
     },
   );
