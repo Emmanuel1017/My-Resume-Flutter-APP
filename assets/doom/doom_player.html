@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>DOOM Player</title>
 
-  <!-- Load js-dos library from local assets -->
-  <script src="js-dos.js"></script>
-  <script src="wdosbox.js"></script>
+  <!-- Load js-dos library from GitHub (cached after first load) -->
+  <script src="https://raw.githubusercontent.com/Emmanuel1017/Angular-Resume/master/src/assets/doom/js-dos.js"></script>
+  <script src="https://raw.githubusercontent.com/Emmanuel1017/Angular-Resume/master/src/assets/doom/wdosbox.js"></script>
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -70,7 +70,7 @@
 <body>
   <div class="loading" id="loading">
     <div class="spinner"></div>
-    <div>WAITING FOR DOOM...</div>
+    <div>LOADING JS-DOS...</div>
   </div>
   <canvas id="jsdos"></canvas>
 
@@ -97,7 +97,7 @@
       return bytes;
     }
 
-    // Wait for WAD data from Flutter
+    // Wait for scripts and WAD data from Flutter
     window.startDoom = function() {
       const gameTitle = window.gameTitle || 'DOOM';
       const wadBase64 = window.wadData;
@@ -109,98 +109,88 @@
       console.log('[DOOM HTML] typeof WDOSBOX:', typeof WDOSBOX);
 
       if (!wadBase64) {
-        updateLoading('ERROR: No WAD data received from Flutter', true);
+        updateLoading('ERROR: No WAD data received', true);
         return;
       }
 
       if (typeof Dos !== 'function') {
         updateLoading(
-          'ERROR: js-dos library not loaded<br><br>' +
+          'ERROR: js-dos not loaded<br><br>' +
           'typeof Dos: ' + (typeof Dos) + '<br><br>' +
-          'Script tags may have failed to load.',
+          'Check internet connection.',
           true
         );
         return;
       }
 
       try {
-        updateLoading('CONVERTING BUNDLE FOR ' + gameTitle + '...');
+        updateLoading('CONVERTING BUNDLE...');
 
-        // Convert base64 to blob
         const wadData = base64ToArrayBuffer(wadBase64);
         const blob = new Blob([wadData], { type: 'application/octet-stream' });
         const blobUrl = URL.createObjectURL(blob);
 
-        console.log('[DOOM HTML] Created blob URL:', blobUrl);
-        console.log('[DOOM HTML] Blob size:', blob.size, 'bytes');
+        console.log('[DOOM HTML] Blob URL:', blobUrl, 'Size:', blob.size);
 
-        updateLoading('INITIALIZING DOS EMULATOR...');
+        updateLoading('INITIALIZING EMULATOR...');
 
-        // Initialize js-dos v6.22
-        console.log('[DOOM HTML] Creating Dos instance...');
+        dosInstance = Dos(jsdosCanvas, {});
 
-        dosInstance = Dos(jsdosCanvas, {
-          // wdosbox already loaded via script tag
-        });
+        console.log('[DOOM HTML] Dos instance:', dosInstance);
+        console.log('[DOOM HTML] ready type:', typeof dosInstance.ready);
 
-        console.log('[DOOM HTML] Dos instance type:', typeof dosInstance);
-        console.log('[DOOM HTML] Dos instance.ready type:', typeof dosInstance.ready);
-
-        if (!dosInstance || typeof dosInstance.ready !== 'function') {
-          throw new Error('Dos() did not return valid instance with .ready() method');
+        if (typeof dosInstance.ready !== 'function') {
+          throw new Error('Dos().ready not a function. Got: ' + typeof dosInstance.ready);
         }
 
-        // Use .ready() callback
-        console.log('[DOOM HTML] Calling dosInstance.ready()...');
         dosInstance.ready(function(fs, main) {
-          console.log('[DOOM HTML] Dos ready callback invoked!');
-          console.log('[DOOM HTML] fs:', fs);
-          console.log('[DOOM HTML] main:', main);
-          updateLoading('EXTRACTING ' + gameTitle + ' FILES...');
+          console.log('[DOOM HTML] Ready! Extracting...');
+          updateLoading('EXTRACTING FILES...');
 
           fs.extract(blobUrl).then(function() {
-            console.log('[DOOM HTML] Bundle extracted successfully');
+            console.log('[DOOM HTML] Extracted! Starting...');
             updateLoading('STARTING ' + gameTitle + '...');
 
-            // Hide loading, show game
             setTimeout(function() {
               loading.style.display = 'none';
               jsdosCanvas.style.display = 'block';
             }, 500);
 
-            // Start DOOM
             main([]).then(function(ci) {
-              console.log('[DOOM HTML] Game started successfully!');
+              console.log('[DOOM HTML] Started!');
               window.ci = ci;
             }).catch(function(err) {
               console.error('[DOOM HTML] Main error:', err);
-              updateLoading('ERROR STARTING GAME:<br><br>' + err.message, true);
+              updateLoading('ERROR STARTING:<br>' + err.message, true);
               loading.style.display = 'block';
             });
 
           }).catch(function(err) {
             console.error('[DOOM HTML] Extract error:', err);
-            updateLoading(
-              'ERROR EXTRACTING BUNDLE:<br><br>' +
-              err.message,
-              true
-            );
+            updateLoading('ERROR EXTRACTING:<br>' + err.message, true);
           });
         });
 
       } catch (err) {
         console.error('[DOOM HTML] Error:', err);
-        updateLoading(
-          'ERROR:<br><br>' +
-          err.message + '<br><br>' +
-          (err.stack || ''),
-          true
-        );
+        updateLoading('ERROR:<br>' + err.message + '<br>' + (err.stack || ''), true);
       }
     };
 
-    console.log('[DOOM HTML] Page loaded');
-    console.log('[DOOM HTML] Waiting for Flutter to call startDoom()...');
+    console.log('[DOOM HTML] Page loaded, checking scripts...');
+    console.log('[DOOM HTML] typeof Dos:', typeof Dos);
+
+    // Give scripts time to load, then check
+    setTimeout(function() {
+      if (typeof Dos !== 'function') {
+        updateLoading(
+          'WAITING FOR JS-DOS LIBRARY...<br><br>' +
+          'Loading from GitHub...<br>' +
+          'This requires internet connection.',
+          false
+        );
+      }
+    }, 1000);
   </script>
 </body>
 </html>
