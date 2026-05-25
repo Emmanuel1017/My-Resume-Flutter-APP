@@ -328,62 +328,35 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
       updateLoading('INITIALIZING...');
 
       try {
-        const dosInstance = Dos(canvas, {});
-        console.log('[DOOM] Dos instance:', dosInstance);
-        console.log('[DOOM] typeof dosInstance:', typeof dosInstance);
-        console.log('[DOOM] dosInstance.ready:', dosInstance.ready);
-        console.log('[DOOM] typeof dosInstance.ready:', typeof dosInstance.ready);
-        console.log('[DOOM] dosInstance keys:', Object.keys(dosInstance));
-        console.log('[DOOM] dosInstance.then:', dosInstance.then);
-        console.log('[DOOM] typeof dosInstance.then:', typeof dosInstance.then);
+        const dosInstance = Dos(canvas);
+        console.log('[DOOM] Dos instance created');
+        console.log('[DOOM] typeof dosInstance.run:', typeof dosInstance.run);
 
-        // Check if it's a promise (js-dos v7/v8 style)
-        if (dosInstance && typeof dosInstance.then === 'function') {
-          console.log('[DOOM] Dos() returned a promise, using promise API...');
-          dosInstance.then(function(runtime) {
-            console.log('[DOOM] Runtime ready!');
-            updateLoading('EXTRACTING...');
+        // js-dos v8 API: Dos(element).run(bundle_url)
+        if (typeof dosInstance.run === 'function') {
+          console.log('[DOOM] Using js-dos v8 API with .run()...');
 
-            runtime.fs.extract(blobUrl).then(function() {
-              console.log('[DOOM] Extracted!');
-              updateLoading('STARTING ${game.title}...');
+          // Configure before running
+          dosInstance.setAutoStart(true);
 
-              setTimeout(function() {
-                loading.style.display = 'none';
-                canvas.style.display = 'block';
-              }, 500);
+          updateLoading('STARTING ${game.title}...');
 
-              runtime.main([]).then(function(ci) {
-                console.log('[DOOM] Started!');
-                window.ci = ci;
-              });
-            });
-          });
-        }
-        // Check if it has .ready() (js-dos v6.22 style)
-        else if (dosInstance && typeof dosInstance.ready === 'function') {
-          console.log('[DOOM] Using .ready() API...');
-          dosInstance.ready(function(fs, main) {
-            console.log('[DOOM] Ready!');
-            updateLoading('EXTRACTING...');
+          setTimeout(function() {
+            loading.style.display = 'none';
+            canvas.style.display = 'block';
+          }, 500);
 
-            fs.extract(blobUrl).then(function() {
-              console.log('[DOOM] Extracted!');
-              updateLoading('STARTING ${game.title}...');
-
-              setTimeout(function() {
-                loading.style.display = 'none';
-                canvas.style.display = 'block';
-              }, 500);
-
-              main([]).then(function(ci) {
-                console.log('[DOOM] Started!');
-                window.ci = ci;
-              });
-            });
+          // Run with blob URL
+          dosInstance.run(blobUrl).then(function(ci) {
+            console.log('[DOOM] Started!');
+            window.ci = ci;
+          }).catch(function(err) {
+            console.error('[DOOM] Run error:', err);
+            updateLoading('ERROR: ' + err.message, true);
+            loading.style.display = 'block';
           });
         } else {
-          throw new Error('Unknown Dos() API. Got: ' + typeof dosInstance + ', ready: ' + typeof dosInstance.ready);
+          throw new Error('dosInstance.run not found. Available methods: ' + Object.keys(dosInstance).join(', '));
         }
       } catch (err) {
         console.error('[DOOM] Initialization error:', err);
