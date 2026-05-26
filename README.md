@@ -67,10 +67,7 @@ The admin app provides real-time analytics and email management for the Angular 
     <td align="center" width="50%"><img src="docs/screenshots/17-visits-analytics.jpg" alt="Visits Analytics" width="220" /><br/><sub><b>Visits Analytics</b><br/>Real-time portfolio traffic stats</sub></td>
     <td align="center" width="50%"><img src="docs/screenshots/18-visits-detail.jpg" alt="Visit Details" width="220" /><br/><sub><b>Visit Details</b><br/>IP, location, device, connection info</sub></td>
   </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/19-email-message-1.jpg" alt="Email Message 1" width="220" /><br/><sub><b>Email Integration</b><br/>Professional correspondence via Gmail</sub></td>
-    <td align="center"><img src="docs/screenshots/20-email-message-2.jpg" alt="Email Message 2" width="220" /><br/><sub><b>Email Thread</b><br/>Full message history & replies</sub></td>
-  </tr>
+
 </table>
 
 **Analytics Dashboard**:
