@@ -1,6 +1,6 @@
 name: portfolio_admin
 description: Portfolio viewer + admin panel for Korir Emmanuel's site.
-version: 1.0.0+1
+version: 2.0.1+2
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
