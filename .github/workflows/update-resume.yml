@@ -1,0 +1,116 @@
+name: Update Resume with Latest Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  update-resume:
+    name: Update Resume Site with New Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Get latest release info
+        id: release
+        run: |
+          # Get latest release info from GitHub API
+          RELEASE_TAG=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.tag_name')
+          RELEASE_URL=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.html_url')
+          RELEASE_DATE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.published_at' | cut -d'T' -f1)
+          APK_URL=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.assets[0].browser_download_url')
+          APK_SIZE=$(curl -s https://api.github.com/repos/${{ github.repository }}/releases/latest | jq -r '.assets[0].size')
+          APK_SIZE_MB=$(echo "scale=1; $APK_SIZE / 1048576" | bc)
+
+          echo "tag=$RELEASE_TAG" >> $GITHUB_OUTPUT
+          echo "url=$RELEASE_URL" >> $GITHUB_OUTPUT
+          echo "date=$RELEASE_DATE" >> $GITHUB_OUTPUT
+          echo "apk_url=$APK_URL" >> $GITHUB_OUTPUT
+          echo "apk_size=${APK_SIZE_MB}MB" >> $GITHUB_OUTPUT
+
+      - name: Generate Resume Update JSON
+        run: |
+          # Create a JSON file with release info for the resume site
+          cat > release-info.json <<EOF
+          {
+            "app": "Portfolio Admin",
+            "version": "${{ steps.release.outputs.tag }}",
+            "release_date": "${{ steps.release.outputs.date }}",
+            "release_url": "${{ steps.release.outputs.url }}",
+            "apk_download": "${{ steps.release.outputs.apk_url }}",
+            "apk_size": "${{ steps.release.outputs.apk_size }}",
+            "platform": "Android",
+            "features": [
+              "Portfolio Viewer",
+              "Admin Panel",
+              "Kori AI Assistant",
+              "Native DOOM Engine"
+            ],
+            "updated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          }
+          EOF
+
+          cat release-info.json
+
+      - name: Update README with latest release
+        run: |
+          # Update README.md with latest release badge and link
+          if [ -f README.md ]; then
+            # Add or update release badge
+            if grep -q "Latest Release" README.md; then
+              sed -i "s|!\[Latest Release\](.*)|![Latest Release](https://img.shields.io/github/v/release/${{ github.repository }}?style=for-the-badge\&color=success)|" README.md
+            else
+              # Add badge at top of README
+              echo -e "![Latest Release](https://img.shields.io/github/v/release/${{ github.repository }}?style=for-the-badge\&color=success)\n\n$(cat README.md)" > README.md.tmp
+              mv README.md.tmp README.md
+            fi
+
+            # Update download section
+            if grep -q "## Download" README.md; then
+              sed -i "/## Download/,/^## / {
+                /## Download/!{/^## /!d}
+              }" README.md
+            fi
+
+            # Add download section
+            cat >> README.md <<EOF
+
+## Download
+
+**Latest Version**: ${{ steps.release.outputs.tag }} (Released: ${{ steps.release.outputs.date }})
+
+[![Download APK](https://img.shields.io/badge/Download-APK%20(${{ steps.release.outputs.apk_size }})-blue?style=for-the-badge\&logo=android)](${{ steps.release.outputs.apk_url }})
+
+[View All Releases](${{ steps.release.outputs.url }})
+
+### Installation
+1. Download the APK
+2. Enable "Install from Unknown Sources" in Settings
+3. Install and enjoy!
+EOF
+          fi
+
+      - name: Commit and push README update
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          if git diff --quiet; then
+            echo "No changes to commit"
+          else
+            git add README.md release-info.json
+            git commit -m "docs: update README with release ${{ steps.release.outputs.tag }}"
+            git push
+          fi
+
+      # Optional: Deploy to Firebase or update remote resume site
+      - name: Trigger Resume Site Update (Optional)
+        if: false  # Enable this if you have a separate resume site
+        run: |
+          # Example: Trigger a webhook to update your resume website
+          curl -X POST ${{ secrets.RESUME_WEBHOOK_URL }} \
+            -H "Content-Type: application/json" \
+            -d @release-info.json
