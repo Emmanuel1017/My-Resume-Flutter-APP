@@ -58,6 +58,38 @@ So the app embeds the site, then carves out a handful of native screens to handl
 
 ---
 
+## Admin Features - Portfolio Analytics & Email Integration
+
+The admin app provides real-time analytics and email management for the Angular resume portfolio.
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/screenshots/17-visits-analytics.jpg" alt="Visits Analytics" width="220" /><br/><sub><b>Visits Analytics</b><br/>Real-time portfolio traffic stats</sub></td>
+    <td align="center" width="50%"><img src="docs/screenshots/18-visits-detail.jpg" alt="Visit Details" width="220" /><br/><sub><b>Visit Details</b><br/>IP, location, device, connection info</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/19-email-message-1.jpg" alt="Email Message 1" width="220" /><br/><sub><b>Email Integration</b><br/>Professional correspondence via Gmail</sub></td>
+    <td align="center"><img src="docs/screenshots/20-email-message-2.jpg" alt="Email Message 2" width="220" /><br/><sub><b>Email Thread</b><br/>Full message history & replies</sub></td>
+  </tr>
+</table>
+
+**Analytics Dashboard**:
+- **Real-time visit tracking**: Today, 7 days, 30 days, all-time metrics
+- **Unique IP tracking**: 9 unique visitors from analytics shown
+- **Geographic insights**: Top country (Kenya), top city (Nairobi)
+- **Source breakdown**: Flutter admin (25 visits) vs Web (11 visits)
+- **Daily trends**: 14-day sparkline chart showing traffic patterns
+- **Detailed visitor logs**: IP addresses, ISP, ASN, geolocation, timezone, language, platform, user agent, screen resolution, connection speed
+
+**Email Integration**:
+- Professional email client integrated directly in the admin app
+- View and respond to portfolio inquiries from mobile
+- Full email thread history with proper formatting
+- Contact information from government officials and business inquiries
+- Quick actions: Reply, Reply All, Forward, Delete
+
+---
+
 ## DOOM on Android
 
 Yes, this app runs DOOM. Classic 1993 DOOM, running natively in Kotlin via a full C++ to Kotlin line-by-line port, with on-screen touch controls, Vulkan rendering, and proper game settings.
