@@ -55,3 +55,4 @@ lib/firebase_options.dart
 # Misc
 *.log
 pubspec.lock
+~

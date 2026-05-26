@@ -214,7 +214,35 @@ class _NavBar extends StatelessWidget {
                                       ),
                                     ],
                                   )
-                                : Icon(item.icon, color: color, size: 22),
+                                : i == 3
+                                    ? Stack(
+                                        clipBehavior: Clip.none,
+                                        children: [
+                                          Icon(item.icon, color: color, size: 22),
+                                          Positioned(
+                                            top: -5, right: -7,
+                                            child: Container(
+                                              width: 14,
+                                              height: 14,
+                                              decoration: BoxDecoration(
+                                                borderRadius: BorderRadius.circular(3),
+                                                border: Border.all(
+                                                  color: const Color(0xFFc41e1e),
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: ClipRRect(
+                                                borderRadius: BorderRadius.circular(2),
+                                                child: Image.asset(
+                                                  'assets/doom/doomguy-face.jpg',
+                                                  fit: BoxFit.cover,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      )
+                                    : Icon(item.icon, color: color, size: 22),
 
                             if (active) ...[
                               const SizedBox(width: 5),
