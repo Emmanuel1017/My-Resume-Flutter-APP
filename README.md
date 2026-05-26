@@ -58,6 +58,34 @@ So the app embeds the site, then carves out a handful of native screens to handl
 
 ---
 
+## DOOM on Android
+
+Yes, this app runs DOOM. Classic 1993 DOOM, running natively in Kotlin via a full C++ to Kotlin line-by-line port, with on-screen touch controls, Vulkan rendering, and proper game settings.
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/screenshots/doom/01-doom-extras-page.jpg" alt="DOOM Extras" width="220" /><br/><sub><b>Extras</b><br/>Games & Interactive Elements</sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/doom/02-doom-settings.jpg" alt="DOOM Settings" width="220" /><br/><sub><b>Settings</b><br/>Renderer, controls, audio</sub></td>
+    <td align="center" width="33%"><img src="docs/screenshots/doom/03-doom-gameplay-1.jpg" alt="DOOM Gameplay" width="220" /><br/><sub><b>Gameplay</b><br/>E2M1 · The Shores of Hell</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/doom/04-doom-loading.jpg" alt="DOOM Loading" width="220" /><br/><sub><b>Loading</b><br/>Native Kotlin port initialization</sub></td>
+    <td align="center"><img src="docs/screenshots/doom/05-doom-gameplay-2.jpg" alt="DOOM Combat" width="220" /><br/><sub><b>Combat</b><br/>8-11 FPS on this resume</sub></td>
+    <td align="center"><img src="docs/screenshots/doom/06-doom-menu.jpg" alt="DOOM Menu" width="220" /><br/><sub><b>Main Menu</b><br/>New Game, Options, Load/Save</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/doom/07-doom-gameplay-3.jpg" alt="DOOM E2M2" width="220" /><br/><sub><b>E2M2</b><br/>Containment Area</sub></td>
+    <td align="center"><img src="docs/screenshots/doom/08-doom-gameplay-4.jpg" alt="DOOM Touch Controls" width="220" /><br/><sub><b>More Combat</b><br/>Touch controls working</sub></td>
+    <td align="center" width="33%"></td>
+  </tr>
+</table>
+
+**Implementation**: Native Kotlin port (C++ to Kotlin line-by-line conversion). Full DOOM II WAD included. Vulkan renderer with 32-bit TrueColor support, smooth scaling, parallel rendering. On-screen virtual controls (W/A/S/D movement, strafe left/right, fire, use, run), configurable swipe sensitivity (14px threshold), adjustable gamma/brightness. Sound effects and MIDI music playback. Settings apply on next game launch.
+
+**Why not emulation?** Because I could. The portfolio already runs DOOM in a WebAssembly DOS emulator via js-dos v8. For Android, I wanted something that felt native - direct Kotlin code running on the metal, not a DOS box. So I ported the C++ DOOM engine line-by-line to Kotlin. It's faster, it's cleaner, and it proves the point: if it has a processor, it runs DOOM. Even a resume.
+
+---
+
 ## How it fits together
 
 ```mermaid
