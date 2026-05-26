@@ -45,6 +45,17 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
+
+        <!-- Native DOOM Activity -->
+        <activity
+            android:name=".doom.DoomActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.AppCompat.NoActionBar"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize"
+            android:hardwareAccelerated="true"/>
+
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data

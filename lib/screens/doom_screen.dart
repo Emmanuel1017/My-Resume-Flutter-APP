@@ -1,15 +1,13 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:webview_flutter/webview_flutter.dart';
-import '../services/doom_cache_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
-/// DOOM game screen - downloads WAD from GitHub, caches, and runs via js-dos
+/// DOOM game screen — native Kotlin DOOM engine via platform channel.
+/// Atmospheric UI with CRT scanlines, blood drips, pulsing hellfire glow.
 class DoomScreen extends StatefulWidget {
   const DoomScreen({super.key});
 
@@ -18,41 +16,38 @@ class DoomScreen extends StatefulWidget {
 }
 
 class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
-  final _cacheService = DoomCacheService();
-  WebViewController? _controller;
-  DoomGame? _selectedGame;
-  bool _isDownloading = false;
-  bool _isInitializing = false;
-  bool _isPlaying = false;
-  String _errorMessage = '';
-  double _downloadProgress = 0;
-  String? _cachedWadPath;
+  static const _platform = MethodChannel('com.example.portfolio_admin/doom');
+
+  bool _doom1Cached = false;
+  bool _doom2Cached = false;
+  bool _isCheckingCache = true;
 
   String _currentFact = '';
   Timer? _factTimer;
   String _glitchText = '';
   Timer? _glitchTimer;
 
+  late AnimationController _pulseController;
+  late AnimationController _flickerController;
+
   final List<DoomGame> _games = [
     DoomGame(
-      id: 'doom1',
+      id: 'DOOM1',
       title: 'DOOM',
       subtitle: 'Knee-Deep in the Dead',
-      wadFilename: 'doom.jsdos',
       year: 1993,
-      description: 'The shareware episode that started it all. Fight through Phobos base against demons from Hell.',
+      description:
+          'The shareware episode that started it all. Fight through Phobos base against demons from Hell.',
       coverImage: 'assets/doom/doom1-cover.jpg',
-      sizeBytes: 5539791,
     ),
     DoomGame(
-      id: 'doom2',
+      id: 'DOOM2',
       title: 'DOOM II',
       subtitle: 'Hell on Earth',
-      wadFilename: 'doom2.jsdos',
       year: 1994,
-      description: 'The demons have invaded Earth. Bigger maps, more monsters, the Super Shotgun.',
+      description:
+          'The demons have invaded Earth. Bigger maps, more monsters, the Super Shotgun.',
       coverImage: 'assets/doom/doom2-cover.jpg',
-      sizeBytes: 6975802,
     ),
   ];
 
@@ -72,20 +67,28 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
+
+    _flickerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 150),
+    )..repeat(reverse: true);
+
     _rotateFact();
     _factTimer = Timer.periodic(const Duration(seconds: 6), (_) => _rotateFact());
     _startGlitch();
+    _checkCachedWads();
   }
 
   @override
   void dispose() {
     _factTimer?.cancel();
     _glitchTimer?.cancel();
-    // Restore portrait mode when leaving
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
+    _pulseController.dispose();
+    _flickerController.dispose();
     super.dispose();
   }
 
@@ -99,11 +102,11 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
 
   void _startGlitch() {
     const chars = '!@#\$%^&*()_+-=[]{}|;:,.<>?/~`0123456789ABCDEF';
-    _glitchTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+    _glitchTimer = Timer.periodic(const Duration(milliseconds: 80), (_) {
       if (mounted) {
         setState(() {
           _glitchText = List.generate(
-            3,
+            5 + math.Random().nextInt(4),
             (_) => chars[math.Random().nextInt(chars.length)],
           ).join();
         });
@@ -111,385 +114,260 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
     });
   }
 
-  String get _progressPercent => (_downloadProgress * 100).toStringAsFixed(1);
-
-  void _selectGame(DoomGame game) {
-    setState(() {
-      _selectedGame = game;
-      _errorMessage = '';
-      _isDownloading = false;
-      _isPlaying = false;
-      _cachedWadPath = null;
-      _downloadProgress = 0;
-    });
-
-    _loadGame(game);
-  }
-
-  Future<void> _loadGame(DoomGame game) async {
-    // Enable landscape mode for gameplay
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-
+  Future<void> _checkCachedWads() async {
     try {
-      debugPrint('[DOOM] Loading game: ${game.title}');
-      debugPrint('[DOOM] WAD filename: ${game.wadFilename}');
-
-      setState(() {
-        _isDownloading = true;
-        _downloadProgress = 0;
-      });
-
-      // Step 1: Cache js-dos library if not already cached
-      final isJsDosCached = await _cacheService.isJsDosCached();
-      debugPrint('[DOOM] js-dos library cached: $isJsDosCached');
-
-      if (!isJsDosCached) {
-        debugPrint('[DOOM] Downloading js-dos library from GitHub...');
-        final success = await _cacheService.cacheJsDosLibrary(
-          onProgress: (filename, progress) {
-            debugPrint('[DOOM] Downloading $filename: ${(progress * 100).toStringAsFixed(1)}%');
-            if (mounted) {
-              setState(() {
-                _downloadProgress = progress * 0.5; // First 50% for js-dos
-              });
-            }
-          },
-        );
-
-        if (!success) {
-          throw Exception('Failed to download js-dos library from GitHub. Check internet connection.');
-        }
-        debugPrint('[DOOM] js-dos library cached successfully');
-      }
-
-      // Step 2: Check if WAD is already cached
-      final isCached = await _cacheService.isCached(game.wadFilename);
-      debugPrint('[DOOM] WAD cached: $isCached');
-
-      String? cachedPath;
-      if (isCached) {
-        debugPrint('[DOOM] Using cached WAD file');
-        cachedPath = await _cacheService.getCachedWadFile(game.wadFilename);
-        debugPrint('[DOOM] Cached WAD path: $cachedPath');
-      }
-
-      // Step 3: Download WAD if not cached
-      if (cachedPath == null) {
-        debugPrint('[DOOM] Downloading WAD from GitHub');
-        cachedPath = await _cacheService.getCachedWadFile(
-          game.wadFilename,
-          onProgress: (progress) {
-            debugPrint('[DOOM] WAD download progress: ${(progress * 100).toStringAsFixed(1)}%');
-            if (mounted) {
-              setState(() {
-                // 50-100% for WAD download
-                _downloadProgress = 0.5 + (progress * 0.5);
-              });
-            }
-          },
-        );
-
-        debugPrint('[DOOM] WAD download complete. Path: $cachedPath');
-
-        if (cachedPath == null) {
-          throw Exception('Failed to download WAD file from GitHub. Check internet connection and GitHub URL.');
-        }
-      }
-
-      setState(() {
-        _isDownloading = false;
-        _cachedWadPath = cachedPath;
-      });
-
-      await _initJsDos(game, cachedPath!);
-    } catch (e, stackTrace) {
-      debugPrint('[DOOM] Error loading game: $e');
-      debugPrint('[DOOM] Stack trace: $stackTrace');
+      final doom1 = await _platform.invokeMethod('isWadCached', {'game': 'DOOM1'});
+      final doom2 = await _platform.invokeMethod('isWadCached', {'game': 'DOOM2'});
       if (mounted) {
         setState(() {
-          _errorMessage = 'Error loading game: $e\n\nMake sure you have internet connection and GitHub is accessible.';
-          _isDownloading = false;
-          _isInitializing = false;
+          _doom1Cached = doom1 as bool;
+          _doom2Cached = doom2 as bool;
+          _isCheckingCache = false;
         });
       }
+    } catch (e) {
+      debugPrint('[DOOM] Error checking cache: $e');
+      if (mounted) setState(() => _isCheckingCache = false);
     }
   }
 
-  Future<void> _initJsDos(DoomGame game, String wadPath) async {
-    debugPrint('[DOOM] Initializing js-dos with WAD: $wadPath');
-    setState(() {
-      _isInitializing = true;
-    });
-
+  Future<void> _launchGame(DoomGame game) async {
+    HapticFeedback.mediumImpact();
     try {
-      // Read WAD file as base64
-      debugPrint('[DOOM] Reading WAD file...');
-      final wadFile = File(wadPath);
-      final wadBytes = await wadFile.readAsBytes();
-      debugPrint('[DOOM] WAD file size: ${wadBytes.length} bytes');
-
-      debugPrint('[DOOM] Encoding WAD to base64...');
-      final wadBase64 = base64Encode(wadBytes);
-      debugPrint('[DOOM] WAD Base64 length: ${wadBase64.length} characters');
-
-      // Read js-dos library files to inline in HTML
-      debugPrint('[DOOM] Reading js-dos library files...');
-      final jsDosPath = await _cacheService.getJsDosFilePath('js-dos.js');
-      final wdosboxJsPath = await _cacheService.getJsDosFilePath('wdosbox.js');
-
-      if (jsDosPath == null || wdosboxJsPath == null) {
-        throw Exception('js-dos library files not found in cache');
-      }
-
-      final jsDosCode = await File(jsDosPath).readAsString();
-      final wdosboxJsCode = await File(wdosboxJsPath).readAsString();
-
-      debugPrint('[DOOM] js-dos.js: ${jsDosCode.length} chars');
-      debugPrint('[DOOM] wdosbox.js: ${wdosboxJsCode.length} chars');
-
-      // Create controller first
-      debugPrint('[DOOM] Creating WebViewController...');
-      final controller = WebViewController();
-
-      // Set it to state so callbacks can access it
+      await _platform.invokeMethod('launchDoom', {'game': game.id});
+    } catch (e) {
       if (mounted) {
-        setState(() {
-          _controller = controller;
-        });
-      }
-
-      // Create HTML with inline js-dos scripts
-      debugPrint('[DOOM] Creating HTML with inline scripts...');
-
-      final html = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>DOOM</title>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { width: 100%; height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
-    #jsdos { width: 100vw; height: 100vh; display: block; }
-    canvas { display: block; user-select: none; touch-action: none; }
-    .loading { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; color: #00ff41; font-size: 1.1rem; padding: 2rem; z-index: 1000; text-shadow: 0 0 10px #00ff41; background: rgba(0,0,0,0.8); border-radius: 10px; }
-    .error { color: #c41e1e; }
-    .spinner { border: 4px solid #333; border-top: 4px solid #00ff41; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 20px auto; }
-    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-  </style>
-</head>
-<body>
-  <div class="loading" id="loading"><div class="spinner"></div><div>INITIALIZING...</div></div>
-  <div id="jsdos"></div>
-
-  <script>
-    // Inline js-dos library
-    $jsDosCode
-  </script>
-
-  <script>
-    // Inline wdosbox
-    $wdosboxJsCode
-  </script>
-
-  <script>
-    const loading = document.getElementById('loading');
-    const jsdos = document.getElementById('jsdos');
-
-    function updateLoading(msg, isError) {
-      loading.innerHTML = isError ? '<div class="error">' + msg + '</div>' : '<div class="spinner"></div><div>' + msg + '</div>';
-    }
-
-    function base64ToArrayBuffer(base64) {
-      const bin = atob(base64);
-      const len = bin.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) bytes[i] = bin.charCodeAt(i);
-      return bytes;
-    }
-
-    console.log('[DOOM] typeof Dos:', typeof Dos);
-    console.log('[DOOM] jsdos div:', jsdos);
-
-    if (typeof Dos !== 'function') {
-      updateLoading('ERROR: js-dos not loaded', true);
-    } else {
-      updateLoading('CONVERTING BUNDLE...');
-
-      const wadData = base64ToArrayBuffer("$wadBase64");
-      const blob = new Blob([wadData], { type: 'application/octet-stream' });
-      const blobUrl = URL.createObjectURL(blob);
-
-      console.log('[DOOM] Blob created, size:', blob.size);
-
-      updateLoading('INITIALIZING...');
-
-      try {
-        // js-dos v8 API: Dos(element, options)
-        console.log('[DOOM] Creating Dos with bundleUrl:', blobUrl);
-
-        updateLoading('LOADING ${game.title}...');
-
-        const dosInstance = Dos(jsdos, {
-          url: blobUrl
-        });
-
-        console.log('[DOOM] Dos instance created, methods:', Object.keys(dosInstance).slice(0, 10));
-        window.dosInstance = dosInstance;
-
-        // Wait then hide loading
-        setTimeout(function() {
-          console.log('[DOOM] Hiding loading overlay');
-          loading.style.display = 'none';
-        }, 5000);
-      } catch (err) {
-        console.error('[DOOM] Error:', err);
-        console.error('[DOOM] Stack:', err.stack);
-        updateLoading('ERROR: ' + err.message, true);
-      }
-    }
-  </script>
-</body>
-</html>
-''';
-
-      // Configure controller
-      debugPrint('[DOOM] Configuring WebViewController...');
-      controller
-        ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..setBackgroundColor(const Color(0xFF000000));
-
-      // Load HTML string with inline scripts
-      debugPrint('[DOOM] Loading HTML with inline scripts...');
-      await controller.loadHtmlString(html, baseUrl: 'http://localhost/');
-      debugPrint('[DOOM] HTML loaded');
-
-      if (mounted) {
-        setState(() {
-          _isInitializing = false;
-          _isPlaying = true;
-        });
-      }
-    } catch (e, stackTrace) {
-      debugPrint('[DOOM] Error initializing js-dos: $e');
-      debugPrint('[DOOM] Stack trace: $stackTrace');
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Error initializing game: $e';
-          _isInitializing = false;
-        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error launching DOOM: $e'),
+            backgroundColor: const Color(0xFFc41e1e),
+          ),
+        );
       }
     }
   }
 
-
-  void _backToMenu() {
-    // Restore portrait mode
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-    ]);
-
-    setState(() {
-      _selectedGame = null;
-      _controller = null;
-      _errorMessage = '';
-      _downloadProgress = 0;
-      _isPlaying = false;
-      _isDownloading = false;
-      _isInitializing = false;
-    });
-  }
+  bool _isCached(DoomGame game) =>
+      game.id == 'DOOM1' ? _doom1Cached : _doom2Cached;
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0a0a0a),
+      backgroundColor: const Color(0xFF050505),
       body: Stack(
         children: [
-          // Scanlines overlay
-          if (_selectedGame == null)
-            Positioned.fill(
-              child: IgnorePointer(
-                child: Container(
+          // Hellfire ambient glow — pulsing red from bottom
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            height: 300,
+            child: AnimatedBuilder(
+              animation: _pulseController,
+              builder: (context, child) {
+                return Container(
                   decoration: BoxDecoration(
-                    image: DecorationImage(
-                      image: const AssetImage('assets/branding/icon.png'),
-                      fit: BoxFit.none,
-                      opacity: 0.02,
-                      repeat: ImageRepeat.repeat,
+                    gradient: RadialGradient(
+                      center: Alignment.bottomCenter,
+                      radius: 1.2,
+                      colors: [
+                        const Color(0xFFc41e1e).withOpacity(0.08 + _pulseController.value * 0.06),
+                        Colors.transparent,
+                      ],
                     ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // CRT scanlines overlay
+          Positioned.fill(
+            child: IgnorePointer(
+              child: CustomPaint(painter: _ScanlinePainter()),
+            ),
+          ),
+
+          // Faint background pattern
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                decoration: const BoxDecoration(
+                  image: DecorationImage(
+                    image: AssetImage('assets/branding/icon.png'),
+                    fit: BoxFit.none,
+                    opacity: 0.015,
+                    repeat: ImageRepeat.repeat,
                   ),
                 ),
               ),
             ),
+          ),
+
+          // Blood drip accents (top edge)
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SizedBox(
+              height: 60,
+              child: CustomPaint(painter: _BloodDripPainter()),
+            ),
+          ),
 
           SafeArea(
             child: Column(
               children: [
-                // Header (only in menu)
-                if (_selectedGame == null) _buildHeader(),
-
-                // Content
-                Expanded(
-                  child: _selectedGame == null
-                      ? _buildGameSelection()
-                      : _buildGamePlayer(),
-                ),
-
-                // Footer (only in menu)
-                if (_selectedGame == null) _buildFooter(),
+                _buildHeader(),
+                Expanded(child: _buildGameSelection()),
+                _buildFooter(),
               ],
             ),
           ),
 
-          // Back button overlay when playing
-          if (_selectedGame != null)
-            Positioned(
-              top: MediaQuery.of(context).padding.top + 8,
-              left: 8,
-              child: Material(
-                color: Colors.transparent,
-                child: IconButton(
-                  icon: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.7),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFFc41e1e).withOpacity(0.5),
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.arrow_back,
-                      color: Color(0xFF00ff41),
-                    ),
+          // Vignette overlay
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.transparent,
+                      Colors.black.withOpacity(0.5),
+                    ],
+                    radius: 1.1,
                   ),
-                  onPressed: _backToMenu,
                 ),
               ),
             ),
+          ),
         ],
       ),
     );
   }
 
+  void _showSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1a0a0a),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.75,
+      ),
+      builder: (context) => const _DoomSettingsSheet(),
+    );
+  }
+
   Widget _buildHeader() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
       child: Column(
         children: [
-          // Glitch title
+          // Glitch text decoration left
+          Row(
+            children: [
+              AnimatedBuilder(
+                animation: _flickerController,
+                builder: (context, child) {
+                  return Opacity(
+                    opacity: 0.3 + _flickerController.value * 0.5,
+                    child: Text(
+                      _glitchText,
+                      style: GoogleFonts.sourceCodePro(
+                        fontSize: 10,
+                        color: const Color(0xFF00ff41),
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              const Spacer(),
+              // Settings gear
+              GestureDetector(
+                onTap: _showSettings,
+                child: Container(
+                  width: 32,
+                  height: 32,
+                  margin: const EdgeInsets.only(right: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                      color: const Color(0xFF00ff41).withOpacity(0.4),
+                    ),
+                    color: const Color(0xFF00ff41).withOpacity(0.05),
+                  ),
+                  child: const Icon(
+                    Icons.settings,
+                    color: Color(0xFF00ff41),
+                    size: 18,
+                  ),
+                ),
+              ),
+              // Doomguy face easter egg
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFFc41e1e).withOpacity(0.4),
+                  ),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(7),
+                  child: Image.asset(
+                    'assets/doom/doomguy-face.jpg',
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(
+                    duration: 2000.ms,
+                    begin: const Offset(1, 1),
+                    end: const Offset(1.05, 1.05),
+                  ),
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Main title with layered glitch effect
           Stack(
             children: [
+              // Red offset layer (glitch)
+              Transform.translate(
+                offset: const Offset(2, 0),
+                child: Text(
+                  'CAN IT RUN DOOM?',
+                  style: GoogleFonts.sourceCodePro(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFFc41e1e).withOpacity(0.3),
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+              // Cyan offset layer (glitch)
+              Transform.translate(
+                offset: const Offset(-2, 0),
+                child: Text(
+                  'CAN IT RUN DOOM?',
+                  style: GoogleFonts.sourceCodePro(
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFF00BFFF).withOpacity(0.15),
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+              // Stroke outline
               Text(
                 'CAN IT RUN DOOM?',
                 style: GoogleFonts.sourceCodePro(
-                  fontSize: 28,
+                  fontSize: 26,
                   fontWeight: FontWeight.w900,
                   foreground: Paint()
                     ..style = PaintingStyle.stroke
@@ -498,17 +376,18 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
                   letterSpacing: 2,
                 ),
               ),
+              // Main text
               Text(
                 'CAN IT RUN DOOM?',
                 style: GoogleFonts.sourceCodePro(
-                  fontSize: 28,
+                  fontSize: 26,
                   fontWeight: FontWeight.w900,
                   color: const Color(0xFFc41e1e),
                   letterSpacing: 2,
                   shadows: [
                     Shadow(
-                      color: const Color(0xFFc41e1e).withOpacity(0.8),
-                      blurRadius: 10,
+                      color: const Color(0xFFc41e1e).withOpacity(0.9),
+                      blurRadius: 12,
                     ),
                     Shadow(
                       color: const Color(0xFFc41e1e).withOpacity(0.4),
@@ -517,139 +396,297 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
                   ],
                 ),
               ),
-              Positioned(
-                left: -30,
-                top: 0,
-                child: Text(
-                  _glitchText,
-                  style: GoogleFonts.sourceCodePro(
-                    fontSize: 12,
-                    color: const Color(0xFF00ff41).withOpacity(0.6),
-                  ),
-                ),
-              ),
             ],
           ).animate(onPlay: (c) => c.repeat()).shimmer(
                 duration: 3000.ms,
-                color: const Color(0xFFc41e1e).withOpacity(0.3),
+                color: const Color(0xFFff6b00).withOpacity(0.3),
               ),
 
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
 
-          // Subtitle
+          // Subtitle with typewriter feel
           Text(
             'Doom runs on calculators, fridges, pregnancy tests...',
             textAlign: TextAlign.center,
-            style: GoogleFonts.montserrat(
-              fontSize: 12,
-              color: Colors.white60,
+            style: GoogleFonts.sourceCodePro(
+              fontSize: 11,
+              color: Colors.white54,
+              letterSpacing: 0.5,
             ),
           ),
+          const SizedBox(height: 2),
           Text(
             '...and now, here. Because why not?',
             textAlign: TextAlign.center,
-            style: GoogleFonts.montserrat(
-              fontSize: 12,
+            style: GoogleFonts.sourceCodePro(
+              fontSize: 11,
               color: const Color(0xFFff6b00),
-              fontWeight: FontWeight.w600,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Native Kotlin badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(4),
+              border: Border.all(
+                color: const Color(0xFF7F52FF).withOpacity(0.6),
+              ),
+              color: const Color(0xFF7F52FF).withOpacity(0.1),
+            ),
+            child: Text(
+              'NATIVE KOTLIN PORT • NO EMULATION • FULL SOURCE PORT',
+              style: GoogleFonts.sourceCodePro(
+                fontSize: 9,
+                color: const Color(0xFF7F52FF),
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1,
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 8),
+
+          // Terminal-style divider
+          Container(
+            height: 1,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  const Color(0xFFc41e1e).withOpacity(0.6),
+                  const Color(0xFF00ff41).withOpacity(0.3),
+                  Colors.transparent,
+                ],
+              ),
             ),
           ),
         ],
       ),
-    ).animate().fadeIn(delay: 100.ms).slideY(begin: -0.2);
+    ).animate().fadeIn(delay: 100.ms).slideY(begin: -0.15);
   }
 
   Widget _buildFactTicker() {
     return Container(
-      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+      margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1a1a1a),
+        color: const Color(0xFF0d0d0d),
         borderRadius: BorderRadius.circular(8),
-        border: const Border(
-          left: BorderSide(color: Color(0xFF00ff41), width: 4),
-        ),
+        border: Border.all(color: const Color(0xFF1a1a1a)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF00ff41).withOpacity(0.05),
+            blurRadius: 8,
+          ),
+        ],
       ),
       child: Row(
         children: [
-          Text(
-            '// FUN FACT: ',
-            style: GoogleFonts.sourceCodePro(
-              fontSize: 11,
+          Container(
+            width: 3,
+            height: 32,
+            decoration: BoxDecoration(
               color: const Color(0xFF00ff41),
-              fontWeight: FontWeight.w700,
+              borderRadius: BorderRadius.circular(2),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFF00ff41).withOpacity(0.5),
+                  blurRadius: 6,
+                ),
+              ],
             ),
           ),
+          const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              _currentFact,
-              style: GoogleFonts.montserrat(
-                fontSize: 11,
-                color: Colors.white70,
-              ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '// FUN_FACT.log',
+                  style: GoogleFonts.sourceCodePro(
+                    fontSize: 9,
+                    color: const Color(0xFF00ff41).withOpacity(0.7),
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _currentFact,
+                  style: GoogleFonts.montserrat(
+                    fontSize: 11,
+                    color: Colors.white70,
+                    height: 1.3,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
       ),
-    ).animate(key: ValueKey(_currentFact)).fadeIn();
+    ).animate(key: ValueKey(_currentFact)).fadeIn(duration: 400.ms);
   }
 
   Widget _buildGameSelection() {
+    if (_isCheckingCache) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const CircularProgressIndicator(color: Color(0xFFc41e1e)),
+            const SizedBox(height: 16),
+            Text(
+              'SCANNING HELL PORTAL...',
+              style: GoogleFonts.sourceCodePro(
+                fontSize: 12,
+                color: const Color(0xFF00ff41),
+                letterSpacing: 2,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20),
+      padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Column(
         children: [
           _buildFactTicker(),
-          const SizedBox(height: 8),
-          ..._games.map((game) => Padding(
+          const SizedBox(height: 4),
+          ..._games.asMap().entries.map((entry) => Padding(
                 padding: const EdgeInsets.only(bottom: 16),
-                child: _buildGameCard(game),
+                child: _buildGameCard(entry.value, entry.key),
               )),
+          const SizedBox(height: 8),
         ],
       ),
     );
   }
 
-  Widget _buildGameCard(DoomGame game) {
+  Widget _buildGameCard(DoomGame game, int index) {
+    final cached = _isCached(game);
+
     return GestureDetector(
-      onTap: () {
-        HapticFeedback.mediumImpact();
-        _selectGame(game);
-      },
-      child: Container(
-        decoration: BoxDecoration(
-          color: const Color(0xFF1a1a1a),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: const Color(0xFF333333),
-          ),
-        ),
+      onTap: () => _launchGame(game),
+      child: AnimatedBuilder(
+        animation: _pulseController,
+        builder: (context, child) {
+          return Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF0f0f0f),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: const Color(0xFFc41e1e).withOpacity(0.2 + _pulseController.value * 0.1),
+                width: 1.5,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFc41e1e).withOpacity(0.05 + _pulseController.value * 0.04),
+                  blurRadius: 16,
+                  spreadRadius: 0,
+                ),
+              ],
+            ),
+            child: child,
+          );
+        },
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Cover image
+            // Cover image with hellfire gradient
             Stack(
               children: [
                 ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
                   child: Image.asset(
                     game.coverImage,
-                    height: 180,
+                    height: 170,
                     width: double.infinity,
                     fit: BoxFit.cover,
                   ),
                 ),
+                // Dark overlay with red tint
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
                       gradient: LinearGradient(
                         begin: Alignment.topCenter,
                         end: Alignment.bottomCenter,
+                        stops: const [0.0, 0.5, 1.0],
                         colors: [
+                          const Color(0xFFc41e1e).withOpacity(0.1),
                           Colors.transparent,
-                          const Color(0xFF1a1a1a),
+                          const Color(0xFF0f0f0f),
                         ],
+                      ),
+                    ),
+                  ),
+                ),
+                // Cached badge
+                if (cached)
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.8),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0xFF00ff41).withOpacity(0.8),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF00ff41).withOpacity(0.3),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.check_circle, size: 12, color: const Color(0xFF00ff41)),
+                          const SizedBox(width: 4),
+                          Text(
+                            'CACHED',
+                            style: GoogleFonts.sourceCodePro(
+                              fontSize: 9,
+                              fontWeight: FontWeight.bold,
+                              color: const Color(0xFF00ff41),
+                              letterSpacing: 1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                // Year badge top-left
+                Positioned(
+                  top: 12,
+                  left: 12,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.7),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(
+                        color: const Color(0xFF00ff41).withOpacity(0.4),
+                      ),
+                    ),
+                    child: Text(
+                      '${game.year}',
+                      style: GoogleFonts.sourceCodePro(
+                        fontSize: 10,
+                        color: const Color(0xFF00ff41),
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2,
                       ),
                     ),
                   ),
@@ -657,41 +694,35 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
               ],
             ),
 
-            // Content
+            // Content section
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    game.year.toString(),
-                    style: GoogleFonts.sourceCodePro(
-                      fontSize: 10,
-                      color: const Color(0xFF00ff41),
-                      letterSpacing: 2,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
+                  // Title with glow
                   Text(
                     game.title,
                     style: GoogleFonts.sourceCodePro(
-                      fontSize: 22,
+                      fontSize: 24,
                       fontWeight: FontWeight.w900,
                       color: const Color(0xFFc41e1e),
+                      letterSpacing: 1,
                       shadows: [
                         Shadow(
-                          color: const Color(0xFFc41e1e).withOpacity(0.4),
-                          blurRadius: 10,
+                          color: const Color(0xFFc41e1e).withOpacity(0.6),
+                          blurRadius: 12,
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(height: 2),
                   Text(
                     game.subtitle,
                     style: GoogleFonts.montserrat(
                       fontSize: 13,
                       color: const Color(0xFFff6b00),
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -699,37 +730,44 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
                     game.description,
                     style: GoogleFonts.montserrat(
                       fontSize: 12,
-                      color: Colors.white60,
-                      height: 1.4,
+                      color: Colors.white54,
+                      height: 1.5,
                     ),
                   ),
                   const SizedBox(height: 14),
+
+                  // Action button
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF333333),
-                      borderRadius: BorderRadius.circular(8),
+                      gradient: LinearGradient(
+                        colors: [
+                          const Color(0xFFc41e1e).withOpacity(0.2),
+                          const Color(0xFF1a1a1a),
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: const Color(0xFFc41e1e),
+                        color: const Color(0xFFc41e1e).withOpacity(0.6),
                       ),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(
-                          Icons.play_arrow,
-                          color: Colors.white,
-                          size: 18,
+                        Icon(
+                          cached ? Icons.play_arrow_rounded : Icons.download_rounded,
+                          color: const Color(0xFFc41e1e),
+                          size: 20,
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          'CAN IT RUN ?',
+                          cached ? 'RIP AND TEAR' : 'DOWNLOAD & RUN',
                           style: GoogleFonts.sourceCodePro(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: Colors.white,
-                            letterSpacing: 1.2,
+                            letterSpacing: 1.5,
                           ),
                         ),
                       ],
@@ -741,258 +779,509 @@ class _DoomScreenState extends State<DoomScreen> with TickerProviderStateMixin {
           ],
         ),
       ),
-    ).animate().fadeIn().scale(begin: const Offset(0.95, 0.95));
-  }
-
-  Widget _buildGamePlayer() {
-    if (_isDownloading) {
-      return _buildDownloadingScreen();
-    }
-
-    if (_isInitializing) {
-      return _buildInitializingScreen();
-    }
-
-    if (_errorMessage.isNotEmpty) {
-      return _buildErrorScreen();
-    }
-
-    if (_controller == null) {
-      return const Center(
-        child: CircularProgressIndicator(color: Color(0xFFc41e1e)),
-      );
-    }
-
-    return WebViewWidget(controller: _controller!);
-  }
-
-  Widget _buildDownloadingScreen() {
-    return Center(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Image.asset(
-              'assets/doom/doomguy-face.jpg',
-              width: 100,
-              height: 100,
-            ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(
-                  duration: 1500.ms,
-                  begin: const Offset(1, 1),
-                  end: const Offset(1.08, 1.08),
-                ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'DOWNLOADING FROM GITHUB...',
-              style: GoogleFonts.sourceCodePro(
-                fontSize: 16,
-                color: const Color(0xFF00ff41),
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            Text(
-              _selectedGame!.title,
-              style: GoogleFonts.montserrat(
-                fontSize: 14,
-                color: const Color(0xFFff6b00),
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            // Progress bar
-            Container(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Column(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Progress',
-                        style: GoogleFonts.montserrat(
-                          fontSize: 12,
-                          color: Colors.white54,
-                        ),
-                      ),
-                      Text(
-                        '$_progressPercent%',
-                        style: GoogleFonts.sourceCodePro(
-                          fontSize: 13,
-                          color: const Color(0xFFff6b00),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF222222),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: const Color(0xFF333333)),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(3),
-                      child: LinearProgressIndicator(
-                        value: _downloadProgress,
-                        backgroundColor: Colors.transparent,
-                        valueColor: const AlwaysStoppedAnimation(Color(0xFFc41e1e)),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            Text(
-              'Downloading WAD file from GitHub...\nThis only happens once, then it\'s cached',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.montserrat(
-                fontSize: 11,
-                color: Colors.white38,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildInitializingScreen() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const CircularProgressIndicator(color: Color(0xFFc41e1e)),
-          const SizedBox(height: 16),
-          Text(
-            'INITIALIZING ${_selectedGame!.title}...',
-            style: GoogleFonts.sourceCodePro(
-              fontSize: 14,
-              color: const Color(0xFF00ff41),
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Loading from cache',
-            style: GoogleFonts.montserrat(
-              fontSize: 11,
-              color: Colors.white54,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildErrorScreen() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.error_outline,
-              color: Color(0xFFc41e1e),
-              size: 64,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              _errorMessage,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.montserrat(
-                fontSize: 13,
-                color: const Color(0xFFc41e1e),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Make sure you have internet connection',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.montserrat(
-                fontSize: 11,
-                color: Colors.white54,
-              ),
-            ),
-            const SizedBox(height: 24),
-            ElevatedButton(
-              onPressed: () => _selectGame(_selectedGame!),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFc41e1e),
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
-              child: Text(
-                'RETRY',
-                style: GoogleFonts.sourceCodePro(
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    ).animate(delay: (150 + index * 100).ms).fadeIn().slideY(begin: 0.1);
   }
 
   Widget _buildFooter() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
       child: Column(
         children: [
+          Container(
+            height: 1,
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Colors.transparent,
+                  const Color(0xFFc41e1e).withOpacity(0.3),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
           Text(
-            '"If it has a processor, it can run Doom." — Ancient Internet Proverb',
+            '"If it has a processor, it can run Doom."',
             textAlign: TextAlign.center,
-            style: GoogleFonts.montserrat(
+            style: GoogleFonts.sourceCodePro(
               fontSize: 10,
-              color: Colors.white38,
+              color: Colors.white30,
               fontStyle: FontStyle.italic,
             ),
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 2),
           Text(
-            'WADs from GitHub • Cached locally • js-dos • Built with ❤️ Emmanuel1017',
+            '— Ancient Internet Proverb',
             textAlign: TextAlign.center,
             style: GoogleFonts.sourceCodePro(
               fontSize: 9,
-              color: Colors.white24,
+              color: const Color(0xFFc41e1e).withOpacity(0.5),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'NATIVE KOTLIN ENGINE • FULL C++ PORT • EMMANUEL1017',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.sourceCodePro(
+              fontSize: 8,
+              color: Colors.white.withOpacity(0.2),
+              letterSpacing: 2,
             ),
           ),
         ],
       ),
-    ).animate().fadeIn(delay: 500.ms);
+    ).animate().fadeIn(delay: 600.ms);
   }
+}
+
+/// CRT scanlines — subtle horizontal lines across the entire screen.
+class _ScanlinePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = Colors.black.withOpacity(0.08)
+      ..strokeWidth = 1;
+
+    for (double y = 0; y < size.height; y += 3) {
+      canvas.drawLine(Offset(0, y), Offset(size.width, y), paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Blood drip accents along the top edge.
+class _BloodDripPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFFc41e1e).withOpacity(0.6)
+      ..style = PaintingStyle.fill;
+
+    final random = math.Random(42);
+    for (int i = 0; i < 12; i++) {
+      final x = random.nextDouble() * size.width;
+      final dripHeight = 8.0 + random.nextDouble() * 35;
+      final width = 2.0 + random.nextDouble() * 3;
+
+      final path = Path()
+        ..moveTo(x - width / 2, 0)
+        ..lineTo(x + width / 2, 0)
+        ..lineTo(x + width / 3, dripHeight - 4)
+        ..quadraticBezierTo(x, dripHeight, x - width / 3, dripHeight - 4)
+        ..close();
+
+      canvas.drawPath(path, paint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class DoomGame {
   final String id;
   final String title;
   final String subtitle;
-  final String wadFilename;
   final int year;
   final String description;
   final String coverImage;
-  final int sizeBytes;
 
   DoomGame({
     required this.id,
     required this.title,
     required this.subtitle,
-    required this.wadFilename,
     required this.year,
     required this.description,
     required this.coverImage,
-    required this.sizeBytes,
   });
+}
+
+class _DoomSettingsSheet extends StatefulWidget {
+  const _DoomSettingsSheet();
+
+  @override
+  State<_DoomSettingsSheet> createState() => _DoomSettingsSheetState();
+}
+
+class _DoomSettingsSheetState extends State<_DoomSettingsSheet> {
+  bool _vsync = true;
+  int _frameRate = 60;
+  String _renderer = 'vulkan';
+  bool _parallelRender = false;
+  String _colorDepth = 'truecolor';
+  int _gamma = 0;
+  bool _smoothScaling = true;
+  bool _showFps = false;
+  String _screenSize = 'full';
+  bool _sfxEnabled = true;
+  bool _musicEnabled = true;
+  int _swipeSensitivity = 8;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _vsync = prefs.getBool('doom_vsync') ?? true;
+      _frameRate = prefs.getInt('doom_framerate') ?? 60;
+      _renderer = prefs.getString('doom_renderer') ?? 'vulkan';
+      _parallelRender = prefs.getBool('doom_parallel') ?? false;
+      _colorDepth = prefs.getString('doom_colordepth') ?? 'truecolor';
+      _gamma = prefs.getInt('doom_gamma') ?? 0;
+      _smoothScaling = prefs.getBool('doom_smooth') ?? true;
+      _showFps = prefs.getBool('doom_showfps') ?? false;
+      _screenSize = prefs.getString('doom_screensize') ?? 'full';
+      _sfxEnabled = prefs.getBool('doom_sfx') ?? true;
+      _musicEnabled = prefs.getBool('doom_music') ?? true;
+      _swipeSensitivity = prefs.getInt('doom_swipe_sensitivity') ?? 8;
+    });
+  }
+
+  Future<void> _save(String key, dynamic value) async {
+    final prefs = await SharedPreferences.getInstance();
+    if (value is bool) prefs.setBool(key, value);
+    if (value is int) prefs.setInt(key, value);
+    if (value is String) prefs.setString(key, value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFc41e1e).withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'ENGINE SETTINGS',
+              style: GoogleFonts.sourceCodePro(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: const Color(0xFFc41e1e),
+                letterSpacing: 2,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Native Kotlin DOOM engine configuration',
+              style: GoogleFonts.sourceCodePro(
+                fontSize: 10,
+                color: Colors.white38,
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // --- DISPLAY ---
+            _sectionHeader('DISPLAY'),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'V-SYNC',
+              'Lock framerate to display refresh',
+              trailing: Switch(
+                value: _vsync,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _vsync = v);
+                  _save('doom_vsync', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'FRAME RATE',
+              '$_frameRate FPS target',
+              trailing: DropdownButton<int>(
+                value: _frameRate,
+                dropdownColor: const Color(0xFF1a0a0a),
+                style: GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFF00ff41)),
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 30, child: Text('30')),
+                  DropdownMenuItem(value: 35, child: Text('35')),
+                  DropdownMenuItem(value: 60, child: Text('60')),
+                  DropdownMenuItem(value: 120, child: Text('120')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _frameRate = v);
+                  _save('doom_framerate', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'SHOW FPS',
+              'Display frame counter overlay',
+              trailing: Switch(
+                value: _showFps,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _showFps = v);
+                  _save('doom_showfps', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'SCREEN SIZE',
+              _screenSize == 'full' ? 'Fullscreen (no HUD border)' : 'Classic (with border)',
+              trailing: DropdownButton<String>(
+                value: _screenSize,
+                dropdownColor: const Color(0xFF1a0a0a),
+                style: GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFF00ff41)),
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 'full', child: Text('Full')),
+                  DropdownMenuItem(value: 'classic', child: Text('Classic')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _screenSize = v);
+                  _save('doom_screensize', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // --- GRAPHICS ---
+            _sectionHeader('GRAPHICS'),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'RENDERER',
+              _renderer == 'vulkan' ? 'Vulkan (preferred)' : 'OpenGL ES',
+              trailing: DropdownButton<String>(
+                value: _renderer,
+                dropdownColor: const Color(0xFF1a0a0a),
+                style: GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFF00ff41)),
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 'vulkan', child: Text('Vulkan')),
+                  DropdownMenuItem(value: 'opengl', child: Text('OpenGL ES')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _renderer = v);
+                  _save('doom_renderer', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'COLOR DEPTH',
+              {'indexed': '8-bit Indexed', 'hicolor': '16-bit HiColor', 'truecolor': '32-bit TrueColor'}[_colorDepth] ?? '32-bit',
+              trailing: DropdownButton<String>(
+                value: _colorDepth,
+                dropdownColor: const Color(0xFF1a0a0a),
+                style: GoogleFonts.sourceCodePro(fontSize: 12, color: const Color(0xFF00ff41)),
+                underline: const SizedBox(),
+                items: const [
+                  DropdownMenuItem(value: 'indexed', child: Text('8-bit')),
+                  DropdownMenuItem(value: 'hicolor', child: Text('16-bit')),
+                  DropdownMenuItem(value: 'truecolor', child: Text('32-bit')),
+                ],
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _colorDepth = v);
+                  _save('doom_colordepth', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'GAMMA',
+              'Brightness correction: $_gamma',
+              trailing: SizedBox(
+                width: 120,
+                child: Slider(
+                  value: _gamma.toDouble(),
+                  min: 0,
+                  max: 4,
+                  divisions: 4,
+                  activeColor: const Color(0xFF00ff41),
+                  onChanged: (v) {
+                    setState(() => _gamma = v.toInt());
+                    _save('doom_gamma', v.toInt());
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'SMOOTH SCALING',
+              'Bilinear filter on upscale',
+              trailing: Switch(
+                value: _smoothScaling,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _smoothScaling = v);
+                  _save('doom_smooth', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'PARALLEL RENDER',
+              'Multi-threaded scene drawing',
+              trailing: Switch(
+                value: _parallelRender,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _parallelRender = v);
+                  _save('doom_parallel', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // --- CONTROLS ---
+            _sectionHeader('CONTROLS'),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'SWIPE SENSITIVITY',
+              'Turn speed: ${_swipeSensitivity}px threshold (lower = faster)',
+              trailing: SizedBox(
+                width: 120,
+                child: Slider(
+                  value: _swipeSensitivity.toDouble(),
+                  min: 2,
+                  max: 20,
+                  divisions: 9,
+                  activeColor: const Color(0xFF00ff41),
+                  onChanged: (v) {
+                    setState(() => _swipeSensitivity = v.toInt());
+                    _save('doom_swipe_sensitivity', v.toInt());
+                  },
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // --- AUDIO ---
+            _sectionHeader('AUDIO'),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'SOUND EFFECTS',
+              'In-game SFX playback',
+              trailing: Switch(
+                value: _sfxEnabled,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _sfxEnabled = v);
+                  _save('doom_sfx', v);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+
+            _settingRow(
+              'MUSIC',
+              'MIDI music playback',
+              trailing: Switch(
+                value: _musicEnabled,
+                activeColor: const Color(0xFF00ff41),
+                onChanged: (v) {
+                  setState(() => _musicEnabled = v);
+                  _save('doom_music', v);
+                },
+              ),
+            ),
+
+            const SizedBox(height: 20),
+            Center(
+              child: Text(
+                'Settings apply on next game launch',
+                style: GoogleFonts.sourceCodePro(
+                  fontSize: 9,
+                  color: Colors.white24,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String title) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        border: Border(
+          left: BorderSide(
+            color: const Color(0xFFc41e1e).withOpacity(0.7),
+            width: 3,
+          ),
+        ),
+      ),
+      child: Text(
+        title,
+        style: GoogleFonts.sourceCodePro(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: const Color(0xFFc41e1e).withOpacity(0.8),
+          letterSpacing: 2,
+        ),
+      ),
+    );
+  }
+
+  Widget _settingRow(String title, String subtitle, {required Widget trailing}) {
+    return Row(
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.sourceCodePro(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white70,
+                  letterSpacing: 1,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: GoogleFonts.sourceCodePro(
+                  fontSize: 9,
+                  color: Colors.white30,
+                ),
+              ),
+            ],
+          ),
+        ),
+        trailing,
+      ],
+    );
+  }
 }

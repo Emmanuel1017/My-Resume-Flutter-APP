@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../theme/app_theme.dart';
-import 'doom_screen_simple.dart';
+import 'doom_screen.dart';
 import 'relax_game_screen.dart';
 
 /// Extras screen containing games and fun interactive elements
@@ -105,13 +105,14 @@ class ExtrasScreen extends StatelessWidget {
                     title: 'CAN IT RUN DOOM?',
                     subtitle: 'Classic FPS • 1993/1994',
                     description: 'Doom runs on calculators, fridges, pregnancy tests...\nand now, your resume.',
+                    badge: 'NATIVE KOTLIN PORT • C++ TO KOTLIN LINE-BY-LINE',
                     color: const Color(0xFFc41e1e),
                     icon: Icons.videogame_asset_outlined,
                     coverAsset: 'assets/doom/doom1-cover.jpg',
                     onTap: () {
                       HapticFeedback.mediumImpact();
                       Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const DoomScreenSimple()),
+                        MaterialPageRoute(builder: (_) => const DoomScreen()),
                       );
                     },
                   ).animate().fadeIn(delay: 200.ms).slideX(begin: -0.1),
@@ -165,6 +166,7 @@ class _GameCard extends StatelessWidget {
   final Color color;
   final IconData icon;
   final String? coverAsset;
+  final String? badge;
   final VoidCallback onTap;
 
   const _GameCard({
@@ -175,6 +177,7 @@ class _GameCard extends StatelessWidget {
     required this.icon,
     required this.coverAsset,
     required this.onTap,
+    this.badge,
   });
 
   @override
@@ -286,6 +289,55 @@ class _GameCard extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
+                  if (badge != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        gradient: LinearGradient(
+                          colors: [
+                            const Color(0xFF7F52FF).withOpacity(0.2),
+                            const Color(0xFFc41e1e).withOpacity(0.15),
+                          ],
+                        ),
+                        border: Border.all(
+                          color: const Color(0xFF7F52FF).withOpacity(0.5),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 20,
+                            height: 20,
+                            margin: const EdgeInsets.only(right: 8),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: Image.asset(
+                                'assets/doom/doomguy-face.jpg',
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          Flexible(
+                            child: Text(
+                              badge!,
+                              style: GoogleFonts.sourceCodePro(
+                                fontSize: 8,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF7F52FF),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 12),
                   Text(
                     description,

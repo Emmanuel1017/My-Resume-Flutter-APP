@@ -63,4 +63,14 @@ dependencies {
     // Provides the runtime backport classes that the desugaring above rewrites
     // bytecode to call. Pinned to the latest 2.x line.
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+
+    // AndroidX AppCompat for DoomActivity
+    implementation("androidx.appcompat:appcompat:1.6.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.6.2")
+
+    // Kotlin coroutines for async WAD extraction
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+
+    // kocoa-doom — Pure Kotlin DOOM source port (https://github.com/hiperbou/kocoa-doom)
+    implementation(project(":kocoa-doom"))
 }
